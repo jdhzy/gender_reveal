@@ -1,13 +1,13 @@
 #!/bin/bash
-#$ -P cs599dg
 #$ -N fetch_ff
+#$ -P cs599dg
 #$ -l h_rt=02:00:00
 #$ -l h_vmem=8G
 #$ -pe omp 1
 #$ -j y
 #$ -o log_fetch_ff.txt
+#$ -cwd
 
-source ~/gender_reveal/venv/bin/activate
-cd ~/gender_reveal/script/data_processing
+source venv/bin/activate
 
-python fetch_FF_data.py
+python script/data_processing/fetch_FF_data.py
