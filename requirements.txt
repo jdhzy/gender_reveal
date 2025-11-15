@@ -1,4 +1,6 @@
 # Data processing libraries
-!pip install datasets
-!pip install pandas
-!pip install numpy
+datasets
+Pillow
+tqdm
+numpy
+pandas
