@@ -1,0 +1,26 @@
+# Ignore virtual environment
+venv/
+
+# Ignore all downloaded or generated data
+data/
+
+# But keep any placeholder files you intentionally add (optional)
+!data/.gitkeep
+
+# Byte-compiled / cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode / PyCharm configs
+.vscode/
+.idea/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+
