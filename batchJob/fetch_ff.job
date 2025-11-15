@@ -1,4 +1,5 @@
 #!/bin/bash
+#$ -P cs599dg
 #$ -N fetch_ff
 #$ -l h_rt=02:00:00
 #$ -l h_vmem=8G
