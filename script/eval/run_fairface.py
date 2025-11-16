@@ -11,8 +11,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
-from script.apis.fairface_hf_model import HFFairFaceGenderModel
 from script.data_processing.transforms import normalize_skintone
+from script.apis.fairface_hf_model import HFFairFaceGenderModel, DEFAULT_MODEL_DIR
 
 
 def load_split(data_root: str, split: str):
@@ -23,6 +23,8 @@ def load_split(data_root: str, split: str):
     Expects:
         <data_root>/<split>/labels.csv
         <data_root>/<split>/<image files...>
+
+    (Adjust if your images live in an 'images/' subfolder.)
     """
     base_dir = os.path.join(data_root, split)
     csv_path = os.path.join(base_dir, "labels.csv")
@@ -42,24 +44,47 @@ def load_split(data_root: str, split: str):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate HF FairFace gender model on a subset.")
-    parser.add_argument("--split", default="validation", choices=["train", "validation"],
-                        help="Which split to evaluate.")
-    parser.add_argument("--use_norm", action="store_true",
-                        help="Apply skin-tone normalization before feeding the model.")
-    parser.add_argument("--out_csv", default=None,
-                        help="Output CSV path (default: metadata/results/hf_fairface_<split>[_norm].csv).")
-    parser.add_argument("--data_root", default=None,
-                        help="Root directory containing <split>/labels.csv. "
-                             "Default: data/cleaned/frontish")
-    parser.add_argument("--max_images", type=int, default=None,
-                        help="Optional maximum number of images to process (for smoke tests).")
+    parser.add_argument(
+        "--split",
+        default="validation",
+        choices=["train", "validation"],
+        help="Which split to evaluate.",
+    )
+    parser.add_argument(
+        "--use_norm",
+        action="store_true",
+        help="Apply skin-tone normalization before feeding the model.",
+    )
+    parser.add_argument(
+        "--out_csv",
+        default=None,
+        help="Output CSV path (default: metadata/results/hf_fairface_<split>[_norm].csv).",
+    )
+    parser.add_argument(
+        "--data_root",
+        default=None,
+        help="Root directory containing <split>/labels.csv. Default: data/cleaned/frontish",
+    )
+    parser.add_argument(
+        "--max_images",
+        type=int,
+        default=None,
+        help="Optional maximum number of images to process (for smoke tests).",
+    )
+    parser.add_argument(
+        "--model_dir",
+        type=str,
+        default=DEFAULT_MODEL_DIR,
+        help="Which HF FairFace checkpoint dir to use.",
+    )
     args = parser.parse_args()
 
     # Default data root: full cleaned frontish
     if args.data_root is None:
         args.data_root = os.path.join(PROJECT_ROOT, "data", "cleaned", "frontish")
 
-    model = HFFairFaceGenderModel()
+    # Instantiate model with the chosen checkpoint directory
+    model = HFFairFaceGenderModel(model_dir=args.model_dir)
 
     # Default output path
     if args.out_csv is None:
@@ -67,9 +92,13 @@ def main():
         os.makedirs(out_dir, exist_ok=True)
         suffix = "_norm" if args.use_norm else ""
         root_tag = "mini" if "mini_eval" in args.data_root else "frontish"
-        args.out_csv = os.path.join(out_dir, f"{model.name}_{root_tag}_{args.split}{suffix}.csv")
+        args.out_csv = os.path.join(
+            out_dir,
+            f"{model.name}_{root_tag}_{args.split}{suffix}.csv",
+        )
 
-    print("Model       :", model.name)
+    print("Model name  :", model.name)
+    print("Using model :", args.model_dir)
     print("Split       :", args.split)
     print("Data root   :", args.data_root)
     print("Skin norm   :", args.use_norm)
@@ -91,6 +120,7 @@ def main():
                 "true_gender": row.get("gender", ""),
                 "true_race": row.get("race", ""),
                 "api_pred": "error",
+                "raw": None,
                 "error": str(e),
             })
             continue
