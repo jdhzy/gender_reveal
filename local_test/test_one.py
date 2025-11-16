@@ -29,8 +29,8 @@ def test_image(path, out_prefix):
 
 def main():
     # EDIT THESE TO YOUR LOCAL TEST IMAGES
-    white_face = "local_test/images/white.jpg"
-    black_face = "local_test/images/black.jpg"
+    white_face = "local_test/images/WHITE_FACE.jpg"
+    black_face = "local_test/images/BLACK_FACE.jpg"
 
     out_base = "local_test/output"
 
