@@ -4,13 +4,13 @@ from PIL import Image
 
 def normalize_skintone(img: Image.Image) -> Image.Image:
     """
-    Normalize skin-tone brightness by forcing the central face region
-    to have a fixed median gray level.
+    Normalize skin-tone brightness using:
+    1. central-region median normalization
+    2. gamma compression to stabilize highlights
 
-    Input:  PIL RGB image
-    Output: PIL RGB image (3-channel) with much more similar overall
-            face brightness across different skin tones.
+    Returns a 3-channel PIL image.
     """
+
     # PIL -> numpy RGB
     img_np = np.array(img.convert("RGB"))
 
@@ -18,29 +18,31 @@ def normalize_skintone(img: Image.Image) -> Image.Image:
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     h, w = gray.shape
 
-    # Use the central region as a proxy for face skin
-    # (FairFace images are mostly centered headshots)
-    x0 = int(0.25 * w)
-    x1 = int(0.75 * w)
-    y0 = int(0.25 * h)
-    y1 = int(0.75 * h)
-    roi = gray[y0:y1, x0:x1]
+    # Central region proxy (middle 50% each direction)
+    x0, x1 = int(0.25 * w), int(0.75 * w)
+    y0, y1 = int(0.25 * h), int(0.75 * h)
+    center = gray[y0:y1, x0:x1]
 
-    # Robust statistic: median intensity in the central region
-    m = float(np.median(roi))
+    m = float(np.median(center))
     if m < 1.0:
-        m = 1.0  # avoid divide-by-zero
+        m = 1.0
 
-    # Target gray level for skin (some mid-gray)
-    target = 140.0  # tweakable: 120–150 is reasonable
-
+    # Step 1 — brightness normalization
+    target = 140.0  # tune if needed
     scale = target / m
 
-    # Apply scaling to the whole image
     norm = gray.astype(np.float32) * scale
-    norm = np.clip(norm, 0, 255).astype(np.uint8)
+    norm = np.clip(norm, 0, 255)
 
-    # Back to 3-channel RGB so models expecting RGB still work
-    norm_rgb = cv2.cvtColor(norm, cv2.COLOR_GRAY2RGB)
+    # Step 2 — gamma compression to prevent blown highlights
+    # gamma < 1 reduces bright regions
+    gamma = 0.8  # you can adjust 0.7–0.9
+    norm_scaled = norm / 255.0
+    compressed = np.power(norm_scaled, gamma) * 255.0
+
+    compressed = np.clip(compressed, 0, 255).astype(np.uint8)
+
+    # Convert back to 3-channel RGB
+    norm_rgb = cv2.cvtColor(compressed, cv2.COLOR_GRAY2RGB)
 
     return Image.fromarray(norm_rgb)
