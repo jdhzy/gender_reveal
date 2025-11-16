@@ -7,5 +7,4 @@ pandas
 
 # Data cleaning libraries
 ## Keep only frontal-ish faces
-mediapipe
 opencv-python
