@@ -4,7 +4,7 @@ from typing import Dict, Any
 
 import torch
 from PIL import Image
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 # Resolve project root for consistent imports
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +32,7 @@ class HFFairFaceGenderModel:
         self.device = device
 
         # Load processor + model
-        self.processor = AutoImageProcessor.from_pretrained(self.model_id)
+        self.processor = AutoFeatureExtractor.from_pretrained(self.model_id)
         self.model = AutoModelForImageClassification.from_pretrained(self.model_id)
         self.model.to(self.device)
         self.model.eval()
