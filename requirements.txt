@@ -8,3 +8,7 @@ pandas
 # Data cleaning libraries
 ## Keep only frontal-ish faces
 opencv-python==4.5.5.64
+
+# API libraries
+torch torchvision --upgrade
+"transformers>=4.40" huggingface_hub
