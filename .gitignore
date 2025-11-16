@@ -3,9 +3,11 @@ venv/
 
 # Ignore all downloaded or generated data
 data/
+metadata/
 
 # But keep any placeholder files you intentionally add (optional)
 !data/.gitkeep
+!metadata/.gitkeep
 
 # Byte-compiled / cache files
 __pycache__/
