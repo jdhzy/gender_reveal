@@ -11,29 +11,44 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
+# Local model directory (where you scp'ed the HF repo)
+DEFAULT_MODEL_DIR = os.path.join(
+    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection"
+)
+
 
 class HFFairFaceGenderModel:
     """
     HuggingFace FairFace gender classifier wrapper.
 
-    Model: dima806/fairface_gender_image_detection
-    Labels (from config): {0: 'Female', 1: 'Male'}
+    Uses a *local* clone of the HF repo:
+    metadata/models/fairface_gender_image_detection
     """
 
-    def __init__(self, device: str = None):
+    def __init__(self, model_dir: str = None, device: str = None):
         self.name = "hf_fairface_gender"
 
-        self.model_id = "dima806/fairface_gender_image_detection"
-        print(f"Loading model: {self.model_id}")
+        # Use local path, not remote HF id
+        if model_dir is None:
+            model_dir = DEFAULT_MODEL_DIR
+        self.model_dir = model_dir
+
+        if not os.path.isdir(self.model_dir):
+            raise FileNotFoundError(
+                f"Model directory not found at {self.model_dir}. "
+                f"Make sure you copied the HuggingFace repo there."
+            )
+
+        print(f"Loading model from local dir: {self.model_dir}")
 
         # Pick device
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        # Load processor + model
-        self.processor = AutoFeatureExtractor.from_pretrained(self.model_id)
-        self.model = AutoModelForImageClassification.from_pretrained(self.model_id)
+        # Load processor + model from local directory (no internet)
+        self.processor = AutoFeatureExtractor.from_pretrained(self.model_dir)
+        self.model = AutoModelForImageClassification.from_pretrained(self.model_dir)
         self.model.to(self.device)
         self.model.eval()
 
