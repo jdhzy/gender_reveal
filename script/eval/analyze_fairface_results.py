@@ -32,18 +32,19 @@ def load_results():
     print("\nColumns in merged dataframe:")
     print(list(df.columns))
 
-    # We know your schema:
-    #   true_gender, true_race, api_pred
-    # Make nice readable columns
+    # Your schema: filename, true_gender, true_race, api_pred, raw
     df["race_name"] = df["true_race"].astype(str).str.strip()
     df["gender_name"] = df["true_gender"].astype(str).str.strip()
 
-    # Normalize prediction + gender to lowercase for comparison
+    # Normalize prediction + true gender into lowercase strings
     df["pred_label_norm"] = df["api_pred"].astype(str).str.strip().str.lower()
     df["true_gender_norm"] = df["gender_name"].astype(str).str.strip().str.lower()
 
-    # Correctness flag
-    df["correct"] = df["pred_label_norm"] == df["true_gender_norm"]
+    # correctness as numeric 0/1, not bool
+    df["correct"] = (df["pred_label_norm"] == df["true_gender_norm"]).astype("int64")
+
+    # small debug: how many are correct?
+    print("\nSanity check: overall mean(correct) =", df["correct"].mean())
 
     return df
 
@@ -58,16 +59,23 @@ def compute_group_stats(df, group_cols):
         .reset_index()
     )
 
+    # ensure float
+    stats["correct_rate"] = stats["correct_rate"].astype(float)
+
     pivot = stats.pivot_table(
         index=group_cols,
         columns="condition",
         values="correct_rate",
     ).reset_index()
 
+    # ensure both columns exist and float
     if "baseline" not in pivot.columns:
-        pivot["baseline"] = None
+        pivot["baseline"] = float("nan")
     if "normalized" not in pivot.columns:
-        pivot["normalized"] = None
+        pivot["normalized"] = float("nan")
+
+    pivot["baseline"] = pivot["baseline"].astype(float)
+    pivot["normalized"] = pivot["normalized"].astype(float)
 
     pivot["delta"] = pivot["normalized"] - pivot["baseline"]
 
@@ -88,6 +96,7 @@ def main():
         .agg(acc=("correct", "mean"), count=("correct", "size"))
         .reset_index()
     )
+    overall["acc"] = overall["acc"].astype(float)
     print(overall)
 
     print("\n==========================")
@@ -113,7 +122,9 @@ def main():
     overall.to_csv(os.path.join(RESULT_DIR, "overall.csv"), index=False)
     race_stats.to_csv(os.path.join(RESULT_DIR, "by_race.csv"), index=False)
     gender_stats.to_csv(os.path.join(RESULT_DIR, "by_gender.csv"), index=False)
-    joint_stats.to_csv(os.path.join(RESULT_DIR, "by_race_gender.csv"), index=False)
+    joint_stats.to_csv(
+        os.path.join(RESULT_DIR, "by_race_gender.csv"), index=False
+    )
 
     print(f"\nSaved summary CSVs to {RESULT_DIR}")
 
