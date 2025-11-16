@@ -15,27 +15,23 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
-from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR  # uses your local HF checkpoint
 from script.data_processing.transforms import normalize_skintone
-
+from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 
 # -----------------------------
-# Dataset for frontish FairFace
+# Dataset: frontish FairFace
 # -----------------------------
 class FrontishFairFaceDataset(Dataset):
     """
-    Expects a structure like:
-        data/cleaned/frontish/train/
-            images/...
-            labels.csv
+    Expects:
+      data/cleaned/frontish/<split>/
+        - labels.csv      (with columns: filename, gender, race)
+        - <images...>     (filenames in labels.csv)
 
-    labels.csv should have columns:
-        filename, gender, race
-    where gender is 0/1 and race is 0..6
-
-    Adjust column names if your labels.csv is slightly different.
+    We do NOT store normalized images on disk.
+    We apply normalize_skintone() on the fly.
     """
 
     def __init__(self, root: str, split: str = "train", use_skin_norm: bool = True):
@@ -44,7 +40,6 @@ class FrontishFairFaceDataset(Dataset):
         self.use_skin_norm = use_skin_norm
 
         self.split_dir = os.path.join(self.root, split)
-        self.images_dir = os.path.join(self.split_dir, "images")
         self.labels_path = os.path.join(self.split_dir, "labels.csv")
 
         if not os.path.exists(self.labels_path):
@@ -52,7 +47,6 @@ class FrontishFairFaceDataset(Dataset):
 
         self.df = pd.read_csv(self.labels_path)
 
-        # Basic sanity check
         required_cols = {"filename", "gender"}
         missing = required_cols - set(self.df.columns)
         if missing:
@@ -66,7 +60,7 @@ class FrontishFairFaceDataset(Dataset):
         filename = row["filename"]
         label = int(row["gender"])  # 0/1
 
-        img_path = os.path.join(self.images_dir, filename)
+        img_path = os.path.join(self.split_dir, filename)
         img = Image.open(img_path).convert("RGB")
 
         if self.use_skin_norm:
@@ -76,53 +70,44 @@ class FrontishFairFaceDataset(Dataset):
 
 
 # -----------------------------
-# Training loop
+# Helper: freeze backbone
 # -----------------------------
 def freeze_backbone(model: nn.Module):
     """
     Freeze all parameters except the classification head.
 
     For ViTForImageClassification, the classification head is `model.classifier`.
-    If this errors, print(model) and adjust the attribute name.
+    If this breaks, print(model) and adjust.
     """
-    for param in model.parameters():
-        param.requires_grad = False
+    for p in model.parameters():
+        p.requires_grad = False
 
-    # Unfreeze classifier head
     if hasattr(model, "classifier"):
-        for param in model.classifier.parameters():
-            param.requires_grad = True
+        for p in model.classifier.parameters():
+            p.requires_grad = True
     else:
-        # Fallback: try `model.classifier` / `model.classifier`
-        print("[WARN] Model has no `.classifier` attr; check model architecture.")
-        # You might need to inspect and adjust manually.
+        print("[WARN] Model has no `.classifier` attribute; check architecture.")
 
 
-def train_epoch(
-    model,
-    feature_extractor,
-    dataloader,
-    optimizer,
-    device: str = "cpu",
-):
+# -----------------------------
+# Train / eval loops
+# -----------------------------
+def train_epoch(model, feature_extractor, loader, optimizer, device: str = "cpu"):
     model.train()
+    loss_fn = nn.CrossEntropyLoss()
+
     total_loss = 0.0
     total_correct = 0
     total_examples = 0
 
-    loss_fn = nn.CrossEntropyLoss()
-
-    for imgs, labels in tqdm(dataloader, desc="Training", leave=False):
-        # imgs: list of PIL images
-        # labels: tensor of shape (B,)
+    for imgs, labels in tqdm(loader, desc="Train", leave=False):
         labels = labels.to(device)
 
-        # Feature extractor will handle resize / normalization
         inputs = feature_extractor(images=list(imgs), return_tensors="pt")
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
         outputs = model(**inputs)
-        logits = outputs.logits  # (B, num_labels)
+        logits = outputs.logits
 
         loss = loss_fn(logits, labels)
 
@@ -135,27 +120,21 @@ def train_epoch(
         total_correct += (preds == labels).sum().item()
         total_examples += labels.size(0)
 
-    avg_loss = total_loss / total_examples
-    avg_acc = total_correct / total_examples
-    return avg_loss, avg_acc
+    return total_loss / total_examples, total_correct / total_examples
 
 
 @torch.no_grad()
-def eval_epoch(
-    model,
-    feature_extractor,
-    dataloader,
-    device: str = "cpu",
-):
+def eval_epoch(model, feature_extractor, loader, device: str = "cpu"):
     model.eval()
+    loss_fn = nn.CrossEntropyLoss()
+
     total_loss = 0.0
     total_correct = 0
     total_examples = 0
 
-    loss_fn = nn.CrossEntropyLoss()
-
-    for imgs, labels in tqdm(dataloader, desc="Eval", leave=False):
+    for imgs, labels in tqdm(loader, desc="Val", leave=False):
         labels = labels.to(device)
+
         inputs = feature_extractor(images=list(imgs), return_tensors="pt")
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -169,9 +148,7 @@ def eval_epoch(
         total_correct += (preds == labels).sum().item()
         total_examples += labels.size(0)
 
-    avg_loss = total_loss / total_examples
-    avg_acc = total_correct / total_examples
-    return avg_loss, avg_acc
+    return total_loss / total_examples, total_correct / total_examples
 
 
 def main():
@@ -186,12 +163,17 @@ def main():
         "--model_dir",
         type=str,
         default=DEFAULT_MODEL_DIR,
-        help="Base FairFace model checkpoint dir (pytorch_model.bin + config.json)",
+        help="Base HF FairFace model dir (pytorch_model.bin + config.json)",
     )
     parser.add_argument(
         "--out_dir",
         type=str,
-        default=os.path.join(PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_norm_ft"),
+        default=os.path.join(
+            PROJECT_ROOT,
+            "metadata",
+            "models",
+            "fairface_gender_image_detection_norm_ft",
+        ),
         help="Where to save fine-tuned model (HF format).",
     )
     parser.add_argument("--batch_size", type=int, default=32)
@@ -203,7 +185,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    print("=== Fine-tuning FairFace on skin-normalized frontish data ===")
+    print("=== Fine-tuning FairFace on SKIN-NORMALIZED TRAIN images ===")
     print("Data root :", args.data_root)
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
@@ -212,18 +194,27 @@ def main():
     print("Device    :", device)
 
     # Datasets
-    train_ds = FrontishFairFaceDataset(args.data_root, split="train", use_skin_norm=True)
-    val_ds = FrontishFairFaceDataset(args.data_root, split="validation", use_skin_norm=True)
+    # 👉 TRAIN: normalized faces (Option A)
+    train_ds = FrontishFairFaceDataset(
+        args.data_root, split="train", use_skin_norm=True
+    )
+
+    # 👉 VAL for early stopping: also normalized (same distribution as train)
+    val_ds = FrontishFairFaceDataset(
+        args.data_root, split="validation", use_skin_norm=True
+    )
+
+    def collate_fn(batch):
+        imgs = [b[0] for b in batch]
+        labels = torch.tensor([b[1] for b in batch], dtype=torch.long)
+        return imgs, labels
 
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        collate_fn=lambda batch: (
-            [b[0] for b in batch],  # list of PILs
-            torch.tensor([b[1] for b in batch], dtype=torch.long),
-        ),
+        collate_fn=collate_fn,
     )
 
     val_loader = DataLoader(
@@ -231,30 +222,27 @@ def main():
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        collate_fn=lambda batch: (
-            [b[0] for b in batch],
-            torch.tensor([b[1] for b in batch], dtype=torch.long),
-        ),
+        collate_fn=collate_fn,
     )
 
-    # Load base model & feature extractor
+    # Model + processor
     print("Loading base model from:", args.model_dir)
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.model_dir)
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
 
-    # Freeze backbone, train classifier head only
+    # Only train classifier head
     freeze_backbone(model)
 
-    # Only optimize trainable params
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = optim.Adam(trainable_params, lr=args.lr)
+    optimizer = optim.Adam(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=args.lr,
+    )
 
     best_val_acc = 0.0
 
     for epoch in range(1, args.epochs + 1):
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
-
         train_loss, train_acc = train_epoch(
             model, feature_extractor, train_loader, optimizer, device
         )
@@ -265,7 +253,6 @@ def main():
         )
         print(f"Val   loss: {val_loss:.4f} | Val   acc: {val_acc:.4f}")
 
-        # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             print(f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ...")
