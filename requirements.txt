@@ -4,6 +4,7 @@ Pillow
 tqdm
 numpy
 pandas
+matplotlib
 
 # Data cleaning libraries
 ## Keep only frontal-ish faces
