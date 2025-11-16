@@ -13,7 +13,7 @@ sys.path.append(PROJECT_ROOT)
 
 # Local model directory (where you scp'ed the HF repo)
 DEFAULT_MODEL_DIR = os.path.join(
-    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection"
+    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_pt"
 )
 
 
@@ -46,13 +46,12 @@ class HFFairFaceGenderModel:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        # Load processor + model from local directory (no internet)
         self.processor = AutoFeatureExtractor.from_pretrained(self.model_dir)
         self.model = AutoModelForImageClassification.from_pretrained(self.model_dir)
         self.model.to(self.device)
         self.model.eval()
 
-        self.id2label = self.model.config.id2label  # e.g. {0: 'Female', 1: 'Male'}
+        self.id2label = self.model.config.id2label
 
     @torch.no_grad()
     def predict_gender(self, img: Image.Image) -> Dict[str, Any]:

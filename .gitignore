@@ -1,28 +1,54 @@
-# Ignore virtual environment
+# -------------------------
+# Virtual environments
+# -------------------------
 venv/
+hfenv/
+.venv/
 
-# Ignore all downloaded or generated data
+# -------------------------
+# Data folders (RAW + cleaned)
+# -------------------------
 data/
-metadata/
 
-# But keep any placeholder files you intentionally add (optional)
+# BUT allow .gitkeep placeholders if you want structure
 !data/.gitkeep
-!metadata/.gitkeep
 
+# -------------------------
+# Models (large HF weights)
+# -------------------------
+metadata/models/
+
+# Allow other metadata files (results, configs)
+!metadata/.gitkeep
+!metadata/results/
+!metadata/results/**
+
+# -------------------------
 # Byte-compiled / cache files
+# -------------------------
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# VSCode / PyCharm configs
+# -------------------------
+# Editor configs
+# -------------------------
 .vscode/
 .idea/
 
+# -------------------------
 # Jupyter checkpoints
+# -------------------------
 .ipynb_checkpoints/
 
-# OS-specific junk
+# -------------------------
+# Model folders accidentally added
+# -------------------------
+fairface_gender_image_detection_pt/
+
+# -------------------------
+# OS junk
+# -------------------------
 .DS_Store
 Thumbs.db
-
