@@ -1,12 +1,13 @@
 import os
 import sys
 import argparse
-from typing import Tuple, List
+from typing import List
 
+import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
-from PIL import Image, Image.BILINEAR
+from PIL import Image
 import pandas as pd
 from tqdm import tqdm
 
@@ -55,7 +56,7 @@ class FrontishFairFaceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int) -> Tuple[Image.Image, int]:
+    def __getitem__(self, idx: int):
         row = self.df.iloc[idx]
         filename = row["filename"]
         label = int(row["gender"])  # 0/1
@@ -115,7 +116,6 @@ class SimplePreprocessor:
         else:
             h = w = sz
 
-        # cast to int in case they were strings
         self.height = int(h)
         self.width = int(w)
 
@@ -138,21 +138,18 @@ class SimplePreprocessor:
         """
         tensor_list = []
         for img in imgs:
+            # resize with PIL
             img_resized = img.resize((self.width, self.height), resample=Image.BILINEAR)
-            # to tensor [0,1]
-            arr = torch.from_numpy(
-                (torch.ByteTensor(torch.ByteStorage.from_buffer(img_resized.tobytes()))
-                 .view(img_resized.size[1], img_resized.size[0], 3)
-                 .numpy()
-                ).astype("float32") / 255.0
-            )
-            # arr is (H, W, C) -> (C, H, W)
-            arr = arr.permute(2, 0, 1)
+
+            # (H, W, C) in [0,1]
+            arr = np.array(img_resized, dtype="float32") / 255.0   # (H, W, C)
+            arr = torch.from_numpy(arr).permute(2, 0, 1)           # (C, H, W)
+
             # normalize
             arr = (arr - self.mean_tensor) / self.std_tensor
             tensor_list.append(arr)
 
-        batch = torch.stack(tensor_list, dim=0)
+        batch = torch.stack(tensor_list, dim=0)  # (B, 3, H, W)
         return batch
 
 
@@ -285,7 +282,7 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + "feature extractor" config (but we don't call it)
+    # Model + "feature extractor" config (but we don't call HF FE directly)
     print("Loading base model from:", args.model_dir)
     hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
     preprocessor = SimplePreprocessor(hf_feat)
