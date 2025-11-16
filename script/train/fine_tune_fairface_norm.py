@@ -1,12 +1,12 @@
 import os
 import sys
 import argparse
-from typing import Tuple
+from typing import Tuple, List
 
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
-from PIL import Image
+from PIL import Image, Image.BILINEAR
 import pandas as pd
 from tqdm import tqdm
 
@@ -77,7 +77,6 @@ def freeze_backbone(model: nn.Module):
     Freeze all parameters except the classification head.
 
     For ViTForImageClassification, the classification head is `model.classifier`.
-    If this breaks, print(model) and adjust.
     """
     for p in model.parameters():
         p.requires_grad = False
@@ -90,9 +89,77 @@ def freeze_backbone(model: nn.Module):
 
 
 # -----------------------------
+# Simple preprocessing
+# -----------------------------
+class SimplePreprocessor:
+    """
+    Re-implements the essential part of the HF feature extractor for training:
+      - resize to expected size
+      - convert to tensor
+      - normalize by image_mean / image_std
+    """
+
+    def __init__(self, feat_extractor):
+        # --- size handling ---
+        sz = getattr(feat_extractor, "size", 224)
+
+        # Normalize size into (H, W) ints
+        if isinstance(sz, dict):
+            h = sz.get("height", sz.get("shortest_edge", 224))
+            w = sz.get("width", sz.get("shortest_edge", 224))
+        elif isinstance(sz, (list, tuple)):
+            if len(sz) == 2:
+                h, w = sz
+            else:
+                h = w = sz[0]
+        else:
+            h = w = sz
+
+        # cast to int in case they were strings
+        self.height = int(h)
+        self.width = int(w)
+
+        # --- mean/std ---
+        self.mean = getattr(feat_extractor, "image_mean", [0.5, 0.5, 0.5])
+        self.std = getattr(feat_extractor, "image_std", [0.5, 0.5, 0.5])
+
+        # make them tensors (for broadcasting)
+        self.mean_tensor = torch.tensor(self.mean).view(3, 1, 1)
+        self.std_tensor = torch.tensor(self.std).view(3, 1, 1)
+
+        print("Preprocessor size (HxW):", self.height, self.width)
+        print("Preprocessor mean:", self.mean)
+        print("Preprocessor std:", self.std)
+
+    def __call__(self, imgs: List[Image.Image]) -> torch.Tensor:
+        """
+        imgs: list of PIL RGB images
+        returns: float32 tensor of shape (B, 3, H, W)
+        """
+        tensor_list = []
+        for img in imgs:
+            img_resized = img.resize((self.width, self.height), resample=Image.BILINEAR)
+            # to tensor [0,1]
+            arr = torch.from_numpy(
+                (torch.ByteTensor(torch.ByteStorage.from_buffer(img_resized.tobytes()))
+                 .view(img_resized.size[1], img_resized.size[0], 3)
+                 .numpy()
+                ).astype("float32") / 255.0
+            )
+            # arr is (H, W, C) -> (C, H, W)
+            arr = arr.permute(2, 0, 1)
+            # normalize
+            arr = (arr - self.mean_tensor) / self.std_tensor
+            tensor_list.append(arr)
+
+        batch = torch.stack(tensor_list, dim=0)
+        return batch
+
+
+# -----------------------------
 # Train / eval loops
 # -----------------------------
-def train_epoch(model, feature_extractor, loader, optimizer, device: str = "cpu"):
+def train_epoch(model, preprocessor, loader, optimizer, device: str = "cpu"):
     model.train()
     loss_fn = nn.CrossEntropyLoss()
 
@@ -103,11 +170,8 @@ def train_epoch(model, feature_extractor, loader, optimizer, device: str = "cpu"
     for imgs, labels in tqdm(loader, desc="Train", leave=False):
         labels = labels.to(device)
 
-        # imgs is a list of PIL images
-        inputs = feature_extractor(images=list(imgs), return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
-        outputs = model(**inputs)
+        pixel_values = preprocessor(imgs).to(device)  # (B, 3, H, W)
+        outputs = model(pixel_values=pixel_values)
         logits = outputs.logits
 
         loss = loss_fn(logits, labels)
@@ -125,7 +189,7 @@ def train_epoch(model, feature_extractor, loader, optimizer, device: str = "cpu"
 
 
 @torch.no_grad()
-def eval_epoch(model, feature_extractor, loader, device: str = "cpu"):
+def eval_epoch(model, preprocessor, loader, device: str = "cpu"):
     model.eval()
     loss_fn = nn.CrossEntropyLoss()
 
@@ -136,10 +200,8 @@ def eval_epoch(model, feature_extractor, loader, device: str = "cpu"):
     for imgs, labels in tqdm(loader, desc="Val", leave=False):
         labels = labels.to(device)
 
-        inputs = feature_extractor(images=list(imgs), return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-
-        outputs = model(**inputs)
+        pixel_values = preprocessor(imgs).to(device)
+        outputs = model(pixel_values=pixel_values)
         logits = outputs.logits
 
         loss = loss_fn(logits, labels)
@@ -191,7 +253,7 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # 🔒 Force CPU (your torch build + A40 are incompatible anyway)
+    # 🔒 Force CPU (A40 + old torch is messy)
     device = "cpu"
     print("Device    :", device)
 
@@ -223,35 +285,10 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + processor
+    # Model + "feature extractor" config (but we don't call it)
     print("Loading base model from:", args.model_dir)
-    feature_extractor = AutoFeatureExtractor.from_pretrained(args.model_dir)
-
-    # 🩹 PATCH: make sure feature_extractor.size uses ints, not strings
-    sz = feature_extractor.size
-    print("Raw feature_extractor.size:", repr(sz))
-
-    if isinstance(sz, dict):
-        new_sz = {}
-        for k, v in sz.items():
-            if isinstance(v, str) and v.isdigit():
-                new_sz[k] = int(v)
-            else:
-                new_sz[k] = v
-        feature_extractor.size = new_sz
-    elif isinstance(sz, (list, tuple)):
-        fixed = []
-        for v in sz:
-            if isinstance(v, str) and v.isdigit():
-                fixed.append(int(v))
-            else:
-                fixed.append(v)
-        feature_extractor.size = tuple(fixed)
-    elif isinstance(sz, str):
-        if sz.isdigit():
-            feature_extractor.size = int(sz)
-
-    print("Patched feature_extractor.size:", repr(feature_extractor.size))
+    hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
+    preprocessor = SimplePreprocessor(hf_feat)
 
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
@@ -269,12 +306,12 @@ def main():
     for epoch in range(1, args.epochs + 1):
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
         train_loss, train_acc = train_epoch(
-            model, feature_extractor, train_loader, optimizer, device
+            model, preprocessor, train_loader, optimizer, device
         )
         print(f"Train loss: {train_loss:.4f} | Train acc: {train_acc:.4f}")
 
         val_loss, val_acc = eval_epoch(
-            model, feature_extractor, val_loader, device
+            model, preprocessor, val_loader, device
         )
         print(f"Val   loss: {val_loss:.4f} | Val   acc: {val_acc:.4f}")
 
@@ -284,7 +321,7 @@ def main():
                 f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ..."
             )
             model.save_pretrained(args.out_dir)
-            feature_extractor.save_pretrained(args.out_dir)
+            hf_feat.save_pretrained(args.out_dir)
 
     print("Done. Best val acc:", best_val_acc)
     print("Fine-tuned model saved in:", args.out_dir)
