@@ -1,21 +1,15 @@
 #!/bin/bash
-#$ -N ff_val_base_gpu
+#$ -N ff_val_norm_cpu
 #$ -P cs599dg
-#$ -l gpus=1
-#$ -l gpu_t=A40
-#$ -l h_vmem=16G
-#$ -l mem_free=64G
-#$ -l h_rt=12:00:00
+#$ -l h_rt=06:00:00
+#$ -l h_vmem=8G
 #$ -pe omp 4
 #$ -cwd
 #$ -j y
-#$ -o batchJob/logs/log_ff_val_base_gpu.txt
+#$ -o batchJob/logs/log_ff_val_norm_cpu.txt
 
 echo "Host: $(hostname)"
-echo "GPU info:"
-nvidia-smi
 
-# Limit threads
 export OMP_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
 export MKL_NUM_THREADS=4
@@ -26,4 +20,5 @@ source venv/bin/activate
 
 python -u script/eval/run_fairface.py \
   --data_root data/cleaned/frontish \
-  --split validation
+  --split validation \
+  --use_norm
