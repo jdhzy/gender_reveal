@@ -2,7 +2,6 @@ import os
 import pandas as pd
 from tqdm import tqdm
 from PIL import Image
-import mediapipe as mp
 import cv2
 import numpy as np
 
@@ -18,49 +17,39 @@ OUT_BASE_DIR = os.path.join(PROJECT_ROOT, "data", "cleaned", "frontish")
 os.makedirs(OUT_BASE_DIR, exist_ok=True)
 
 # -------------------------
-# MediaPipe FaceMesh setup
+# OpenCV Haar Cascades setup
 # -------------------------
-mp_face_mesh = mp.solutions.face_mesh
-# Use two stable corner landmarks for each eye
-LEFT_EYE_LANDMARKS = [33, 133]
-RIGHT_EYE_LANDMARKS = [362, 263]
+HAAR_DIR = cv2.data.haarcascades
+FACE_CASCADE = cv2.CascadeClassifier(os.path.join(HAAR_DIR, "haarcascade_frontalface_default.xml"))
+EYE_CASCADE = cv2.CascadeClassifier(os.path.join(HAAR_DIR, "haarcascade_eye.xml"))
 
 
 def both_eyes_detected(image):
     """
-    Returns True if both eyes are detected with MediaPipe FaceMesh.
-    Returns False otherwise.
+    Returns True if a frontal-ish face is detected and at least 2 eyes are found
+    inside the face bounding box. Returns False otherwise.
     """
-    # PIL -> OpenCV BGR
-    image_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    # PIL -> OpenCV grayscale
+    img_np = np.array(image.convert("RGB"))
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
 
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True
-    ) as face_mesh:
+    # Detect faces
+    faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5)
 
-        results = face_mesh.process(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
+    if len(faces) == 0:
+        return False
 
-        if not results.multi_face_landmarks:
-            return False
+    # Take the largest face
+    faces = sorted(faces, key=lambda box: box[2] * box[3], reverse=True)
+    x, y, w, h = faces[0]
 
-        landmarks = results.multi_face_landmarks[0]
+    roi_gray = gray[y:y + h, x:x + w]
 
-        try:
-            left_eye = [landmarks.landmark[i] for i in LEFT_EYE_LANDMARKS]
-            right_eye = [landmarks.landmark[i] for i in RIGHT_EYE_LANDMARKS]
+    # Detect eyes within the face region
+    eyes = EYE_CASCADE.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=3)
 
-            # Basic existence check – if they collapse to (0, 0) it's junk
-            if any((l.x == 0 and l.y == 0) for l in left_eye):
-                return False
-            if any((l.x == 0 and l.y == 0) for l in right_eye):
-                return False
-
-            return True
-
-        except Exception:
-            return False
+    # If at least 2 eyes are detected, we consider the face "front-ish"
+    return len(eyes) >= 2
 
 
 def clean_split(split):
@@ -80,7 +69,7 @@ def clean_split(split):
         try:
             img = Image.open(img_path).convert("RGB")
         except Exception:
-            # skip unreadable images
+            # Skip unreadable images
             continue
 
         # CORE RULE: both eyes must be detected → "front-ish"
@@ -89,7 +78,6 @@ def clean_split(split):
 
         out_path = os.path.join(split_out, row["filename"])
         img.save(out_path)
-
         kept_rows.append(row)
 
     out_csv = os.path.join(split_out, "labels.csv")
@@ -99,7 +87,6 @@ def clean_split(split):
 
 
 def main():
-    # Right now you have train + validation; add "test" later if you download it
     for split in ["train", "validation"]:
         split_path = os.path.join(FAIRFACE_DIR, split)
         if not os.path.exists(split_path):
