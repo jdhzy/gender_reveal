@@ -103,6 +103,7 @@ def train_epoch(model, feature_extractor, loader, optimizer, device: str = "cpu"
     for imgs, labels in tqdm(loader, desc="Train", leave=False):
         labels = labels.to(device)
 
+        # imgs is a list of PIL images
         inputs = feature_extractor(images=list(imgs), return_tensors="pt")
         inputs = {k: v.to(device) for k, v in inputs.items()}
 
@@ -190,19 +191,14 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    # print("Device    :", device)
-    # Force CPU for now (GPU build is too old for A40)
+    # 🔒 Force CPU (your torch build + A40 are incompatible anyway)
     device = "cpu"
     print("Device    :", device)
 
     # Datasets
-    # 👉 TRAIN: normalized faces (Option A)
     train_ds = FrontishFairFaceDataset(
         args.data_root, split="train", use_skin_norm=True
     )
-
-    # 👉 VAL for early stopping: also normalized (same distribution as train)
     val_ds = FrontishFairFaceDataset(
         args.data_root, split="validation", use_skin_norm=True
     )
@@ -219,7 +215,6 @@ def main():
         num_workers=args.num_workers,
         collate_fn=collate_fn,
     )
-
     val_loader = DataLoader(
         val_ds,
         batch_size=args.batch_size,
@@ -232,26 +227,31 @@ def main():
     print("Loading base model from:", args.model_dir)
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.model_dir)
 
-    # --- PATCH: make sure size is int / tuple of ints, not strings ---
+    # 🩹 PATCH: make sure feature_extractor.size uses ints, not strings
     sz = feature_extractor.size
+    print("Raw feature_extractor.size:", repr(sz))
+
     if isinstance(sz, dict):
-        # e.g. {"height": "224", "width": "224"}
         new_sz = {}
         for k, v in sz.items():
-            try:
+            if isinstance(v, str) and v.isdigit():
                 new_sz[k] = int(v)
-            except (TypeError, ValueError):
+            else:
                 new_sz[k] = v
         feature_extractor.size = new_sz
     elif isinstance(sz, (list, tuple)):
-        feature_extractor.size = tuple(int(v) for v in sz)
+        fixed = []
+        for v in sz:
+            if isinstance(v, str) and v.isdigit():
+                fixed.append(int(v))
+            else:
+                fixed.append(v)
+        feature_extractor.size = tuple(fixed)
     elif isinstance(sz, str):
-        # e.g. "224"
-        try:
+        if sz.isdigit():
             feature_extractor.size = int(sz)
-        except ValueError:
-            pass
-    # --- END PATCH ---
+
+    print("Patched feature_extractor.size:", repr(feature_extractor.size))
 
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
@@ -280,7 +280,9 @@ def main():
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            print(f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ...")
+            print(
+                f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ..."
+            )
             model.save_pretrained(args.out_dir)
             feature_extractor.save_pretrained(args.out_dir)
 
