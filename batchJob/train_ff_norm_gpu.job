@@ -1,0 +1,38 @@
+#!/bin/bash
+#$ -N ff_train_norm
+#$ -P cs599dg
+#$ -l gpus=1
+#$ -l gpu_type=A40
+#$ -l h_rt=12:00:00
+#$ -l h_vmem=24G
+#$ -pe omp 4
+#$ -j y
+#$ -o batchJob/logs/log_ff_train_norm_gpu.txt
+#$ -cwd
+
+echo "Host: $(hostname)"
+echo "Starting fine-tuning..."
+
+# Load Python (SCC default)
+module load python3/3.10.12
+
+# Activate your venv
+source venv/bin/activate
+
+# Limit thread over-parallelization
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export NUMEXPR_NUM_THREADS=4
+
+# Run training
+python script/train/fine_tune_fairface_norm.py \
+  --data_root data/cleaned/frontish \
+  --model_dir metadata/models/fairface_gender_image_detection_pt2 \
+  --out_dir metadata/models/fairface_gender_image_detection_norm_ft \
+  --batch_size 32 \
+  --epochs 3 \
+  --lr 1e-4 \
+  --num_workers 4
+
+echo "Training job complete."
