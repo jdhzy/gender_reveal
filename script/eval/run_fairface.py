@@ -11,7 +11,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
-from script.apis.fairface_model import FairFaceGenderModel
+from script.apis.fairface_hf_model import HFFairFaceGenderModel
 from script.data_processing.transforms import normalize_skintone
 
 
@@ -41,28 +41,25 @@ def load_split(data_root: str, split: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate FairFace gender model on a subset.")
+    parser = argparse.ArgumentParser(description="Evaluate HF FairFace gender model on a subset.")
     parser.add_argument("--split", default="validation", choices=["train", "validation"],
                         help="Which split to evaluate.")
     parser.add_argument("--use_norm", action="store_true",
                         help="Apply skin-tone normalization before feeding the model.")
     parser.add_argument("--out_csv", default=None,
-                        help="Output CSV path (default: metadata/results/fairface_<split>[_norm].csv).")
+                        help="Output CSV path (default: metadata/results/hf_fairface_<split>[_norm].csv).")
     parser.add_argument("--data_root", default=None,
                         help="Root directory containing <split>/labels.csv. "
                              "Default: data/cleaned/frontish")
     parser.add_argument("--max_images", type=int, default=None,
                         help="Optional maximum number of images to process (for smoke tests).")
-    parser.add_argument("--weights", default=None,
-                        help="Path to FairFace gender model weights (.pth). "
-                             "Default: metadata/models/fairface_gender_resnet18.pth")
     args = parser.parse_args()
 
     # Default data root: full cleaned frontish
     if args.data_root is None:
         args.data_root = os.path.join(PROJECT_ROOT, "data", "cleaned", "frontish")
 
-    model = FairFaceGenderModel(weights_path=args.weights or None)
+    model = HFFairFaceGenderModel()
 
     # Default output path
     if args.out_csv is None:
@@ -72,12 +69,12 @@ def main():
         root_tag = "mini" if "mini_eval" in args.data_root else "frontish"
         args.out_csv = os.path.join(out_dir, f"{model.name}_{root_tag}_{args.split}{suffix}.csv")
 
-    print("Model         :", model.name)
-    print("Split         :", args.split)
-    print("Data root     :", args.data_root)
-    print("Skin norm     :", args.use_norm)
-    print("Max images    :", args.max_images)
-    print("Output CSV    :", args.out_csv)
+    print("Model       :", model.name)
+    print("Split       :", args.split)
+    print("Data root   :", args.data_root)
+    print("Skin norm   :", args.use_norm)
+    print("Max images  :", args.max_images)
+    print("Output CSV  :", args.out_csv)
 
     results = []
     count = 0

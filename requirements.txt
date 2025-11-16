@@ -10,5 +10,7 @@ pandas
 opencv-python==4.5.5.64
 
 # API libraries
-torch torchvision --upgrade
-"transformers>=4.40" huggingface_hub
+torch
+torchvision
+transformers
+huggingface_hub
