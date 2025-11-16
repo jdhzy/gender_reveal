@@ -2,7 +2,7 @@
 #$ -N ff_val_base_gpu
 #$ -P cs599dg
 #$ -l gpus=1
-#$ -l gpu_c=A40
+#$ -l gpu_t=A40
 #$ -l h_vmem=16G
 #$ -l mem_free=64G
 #$ -l h_rt=12:00:00
@@ -11,22 +11,19 @@
 #$ -j y
 #$ -o batchJob/logs/log_ff_val_base_gpu.txt
 
-echo "Job running on host:"
-hostname
-echo "GPU available:"
+echo "Host: $(hostname)"
+echo "GPU info:"
 nvidia-smi
 
-# Limit CPU threads
+# Limit threads
 export OMP_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export NUMEXPR_NUM_THREADS=4
 export VECLIB_MAXIMUM_THREADS=4
 
-# Activate venv
 source venv/bin/activate
 
-# Run baseline evaluation (no normalization)
 python -u script/eval/run_fairface.py \
   --data_root data/cleaned/frontish \
   --split validation
