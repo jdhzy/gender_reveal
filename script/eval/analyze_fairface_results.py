@@ -16,19 +16,6 @@ NORM_CSV = os.path.join(
     RESULT_DIR, "hf_fairface_gender_frontish_validation_norm.csv"
 )
 
-# Mapping for readability
-RACE_MAP = {
-    0: "East Asian",
-    1: "Indian",
-    2: "Black",
-    3: "White",
-    4: "Middle Eastern",
-    5: "Latino",
-    6: "Southeast Asian",
-}
-
-GENDER_MAP = {0: "Male", 1: "Female"}
-
 
 def load_results():
     print("Loading baseline:", BASELINE_CSV)
@@ -42,20 +29,28 @@ def load_results():
 
     df = pd.concat([df_base, df_norm], ignore_index=True)
 
-    # Map race & gender to readable names
-    df["race_name"] = df["race"].map(RACE_MAP)
-    df["gender_name"] = df["gender"].map(GENDER_MAP)
+    print("\nColumns in merged dataframe:")
+    print(list(df.columns))
 
-    # Binary label correctness
-    df["correct"] = (df["pred_label"].str.lower() == df["gender_name"].str.lower())
+    # We know your schema:
+    #   true_gender, true_race, api_pred
+    # Make nice readable columns
+    df["race_name"] = df["true_race"].astype(str).str.strip()
+    df["gender_name"] = df["true_gender"].astype(str).str.strip()
+
+    # Normalize prediction + gender to lowercase for comparison
+    df["pred_label_norm"] = df["api_pred"].astype(str).str.strip().str.lower()
+    df["true_gender_norm"] = df["gender_name"].astype(str).str.strip().str.lower()
+
+    # Correctness flag
+    df["correct"] = df["pred_label_norm"] == df["true_gender_norm"]
 
     return df
 
 
 def compute_group_stats(df, group_cols):
     """
-    group_cols = ["race_name"], ["gender_name"], ["race_name","gender_name"]
-    Returns: dataframe with accuracy baseline, accuracy normalized, delta.
+    group_cols = ["race_name"], ["gender_name"], ["race_name", "gender_name"]
     """
     stats = (
         df.groupby(group_cols + ["condition"])
@@ -63,11 +58,10 @@ def compute_group_stats(df, group_cols):
         .reset_index()
     )
 
-    # Pivot: baseline vs normalized
     pivot = stats.pivot_table(
         index=group_cols,
         columns="condition",
-        values="correct_rate"
+        values="correct_rate",
     ).reset_index()
 
     if "baseline" not in pivot.columns:
@@ -76,6 +70,9 @@ def compute_group_stats(df, group_cols):
         pivot["normalized"] = None
 
     pivot["delta"] = pivot["normalized"] - pivot["baseline"]
+
+    ordered_cols = list(group_cols) + ["baseline", "normalized", "delta"]
+    pivot = pivot[ordered_cols]
 
     return pivot
 
@@ -111,20 +108,12 @@ def main():
     joint_stats = compute_group_stats(df, ["race_name", "gender_name"])
     print(joint_stats)
 
-    # Save combined summary
-    out_path = os.path.join(RESULT_DIR, "analysis_summary.csv")
-    summary = {
-        "overall": overall,
-        "race": race_stats,
-        "gender": gender_stats,
-        "race_gender": joint_stats,
-    }
-
-    # Save each section to CSV
+    # Save CSVs
+    os.makedirs(RESULT_DIR, exist_ok=True)
+    overall.to_csv(os.path.join(RESULT_DIR, "overall.csv"), index=False)
     race_stats.to_csv(os.path.join(RESULT_DIR, "by_race.csv"), index=False)
     gender_stats.to_csv(os.path.join(RESULT_DIR, "by_gender.csv"), index=False)
     joint_stats.to_csv(os.path.join(RESULT_DIR, "by_race_gender.csv"), index=False)
-    overall.to_csv(os.path.join(RESULT_DIR, "overall.csv"), index=False)
 
     print(f"\nSaved summary CSVs to {RESULT_DIR}")
 
