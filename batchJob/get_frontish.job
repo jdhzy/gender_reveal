@@ -2,19 +2,19 @@
 #$ -N frontish
 #$ -P cs599dg
 #$ -l h_rt=02:00:00
+#$ -pe omp 4
 #$ -l h_vmem=8G
-#$ -pe omp 1
 #$ -j y
 #$ -o batchJob/logs/log_frontish.txt
 #$ -cwd
 
-# ---- LIMIT THREADS TO 1 CORE ----
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-export VECLIB_MAXIMUM_THREADS=1
-export OPENCV_NUM_THREADS=1
+# ---- LIMIT THREADS TO 4 CORES ----
+export OMP_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export NUMEXPR_NUM_THREADS=4
+export VECLIB_MAXIMUM_THREADS=4
+export OPENCV_NUM_THREADS=4
 
 source venv/bin/activate
 
