@@ -47,7 +47,10 @@ class HFFairFaceGenderModel:
         self.device = device
 
         self.processor = AutoFeatureExtractor.from_pretrained(self.model_dir)
-        self.model = AutoModelForImageClassification.from_pretrained(self.model_dir)
+        self.model = AutoModelForImageClassification.from_pretrained(
+            self.model_dir,
+            from_flax=True
+        )
         self.model.to(self.device)
         self.model.eval()
 
