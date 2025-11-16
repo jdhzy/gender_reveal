@@ -9,6 +9,7 @@ hfenv/
 # Data folders (RAW + cleaned)
 # -------------------------
 data/
+local_test/output/
 
 # BUT allow .gitkeep placeholders if you want structure
 !data/.gitkeep
