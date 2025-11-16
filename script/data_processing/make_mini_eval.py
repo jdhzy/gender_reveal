@@ -2,6 +2,7 @@ import os
 import argparse
 import shutil
 import pandas as pd
+import numpy as np
 from collections import defaultdict
 
 # Figure out project root (two levels up from this file)
@@ -52,7 +53,7 @@ def make_mini_eval(split: str, per_group: int, out_root: str, seed: int = 42):
         print(f"  ({race}, {gender}): {len(idxs)}")
 
     # Sample per group
-    rng = pd.RandomState(seed)
+    rng = np.random.RandomState(seed)
     selected_indices = []
 
     for key, idxs in grouped.items():
