@@ -190,7 +190,10 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # print("Device    :", device)
+    # Force CPU for now (GPU build is too old for A40)
+    device = "cpu"
     print("Device    :", device)
 
     # Datasets
@@ -228,6 +231,28 @@ def main():
     # Model + processor
     print("Loading base model from:", args.model_dir)
     feature_extractor = AutoFeatureExtractor.from_pretrained(args.model_dir)
+
+    # --- PATCH: make sure size is int / tuple of ints, not strings ---
+    sz = feature_extractor.size
+    if isinstance(sz, dict):
+        # e.g. {"height": "224", "width": "224"}
+        new_sz = {}
+        for k, v in sz.items():
+            try:
+                new_sz[k] = int(v)
+            except (TypeError, ValueError):
+                new_sz[k] = v
+        feature_extractor.size = new_sz
+    elif isinstance(sz, (list, tuple)):
+        feature_extractor.size = tuple(int(v) for v in sz)
+    elif isinstance(sz, str):
+        # e.g. "224"
+        try:
+            feature_extractor.size = int(sz)
+        except ValueError:
+            pass
+    # --- END PATCH ---
+
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
 
