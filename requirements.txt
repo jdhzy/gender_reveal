@@ -22,6 +22,7 @@ pandas>=2.2.0
 Pillow>=10.3.0
 tqdm>=4.66.0
 opencv-python>=4.10.0
+matplotlib>=3.8.0
 
 # ===========================
 # Optional / helpers
