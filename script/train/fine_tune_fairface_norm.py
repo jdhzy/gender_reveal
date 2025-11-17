@@ -18,7 +18,7 @@ sys.path.append(PROJECT_ROOT)
 
 from script.data_processing.transforms import normalize_skintone
 from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 
 
 # -----------------------------
@@ -94,15 +94,15 @@ def freeze_backbone(model: nn.Module):
 # -----------------------------
 class SimplePreprocessor:
     """
-    Re-implements the essential part of the HF feature extractor for training:
+    Re-implements the essential part of the HF image processor for training:
       - resize to expected size
       - convert to tensor
       - normalize by image_mean / image_std
     """
 
-    def __init__(self, feat_extractor):
+    def __init__(self, proc):
         # --- size handling ---
-        sz = getattr(feat_extractor, "size", 224)
+        sz = getattr(proc, "size", 224)
 
         # Normalize size into (H, W) ints
         if isinstance(sz, dict):
@@ -120,8 +120,8 @@ class SimplePreprocessor:
         self.width = int(w)
 
         # --- mean/std ---
-        self.mean = getattr(feat_extractor, "image_mean", [0.5, 0.5, 0.5])
-        self.std = getattr(feat_extractor, "image_std", [0.5, 0.5, 0.5])
+        self.mean = getattr(proc, "image_mean", [0.5, 0.5, 0.5])
+        self.std = getattr(proc, "image_std", [0.5, 0.5, 0.5])
 
         # make them tensors (for broadcasting)
         self.mean_tensor = torch.tensor(self.mean).view(3, 1, 1)
@@ -262,7 +262,7 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # ✅ Use GPU if available
+    # Use GPU if available
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
@@ -310,10 +310,10 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + "feature extractor" config (but we don't call HF FE directly at training time)
+    # Model + image processor config
     print("Loading base model from:", args.model_dir)
-    hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
-    preprocessor = SimplePreprocessor(hf_feat)
+    hf_proc = AutoImageProcessor.from_pretrained(args.model_dir)
+    preprocessor = SimplePreprocessor(hf_proc)
 
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
@@ -346,7 +346,7 @@ def main():
                 f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ..."
             )
             model.save_pretrained(args.out_dir)
-            hf_feat.save_pretrained(args.out_dir)
+            hf_proc.save_pretrained(args.out_dir)
 
     print("Done. Best val acc:", best_val_acc)
     print("Fine-tuned model saved in:", args.out_dir)
