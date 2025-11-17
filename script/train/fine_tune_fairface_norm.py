@@ -17,7 +17,32 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
 from script.data_processing.transforms import normalize_skintone
-from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
+
+# -----------------------------
+# Define DEFAULT_MODEL_DIR here
+# (avoid importing fairface_hf_model, which pulls in transformers too early)
+# -----------------------------
+DEFAULT_MODEL_DIR = os.path.join(
+    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_pt2"
+)
+
+# -----------------------------
+# Monkeypatch torch.utils._pytree
+# for transformers compatibility (old vs new torch)
+# -----------------------------
+try:
+    import torch.utils._pytree as _torch_pytree
+
+    if (
+        hasattr(_torch_pytree, "_register_pytree_node")
+        and not hasattr(_torch_pytree, "register_pytree_node")
+    ):
+        # Make transformers happy: alias the old name to the new one.
+        _torch_pytree.register_pytree_node = _torch_pytree._register_pytree_node
+except Exception:
+    # If anything goes wrong, just continue; worst case we see the same error.
+    pass
+
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 
@@ -28,10 +53,10 @@ class FrontishFairFaceDataset(Dataset):
     """
     Expects:
       data/cleaned/frontish/<split>/
-        - labels.csv      (columns: filename, gender, race)
+        - labels.csv      (with columns: filename, gender, race)
         - <images...>     (filenames in labels.csv)
 
-    We DO NOT store normalized images on disk.
+    We do NOT store normalized images on disk.
     We apply normalize_skintone() on the fly.
     """
 
@@ -262,8 +287,8 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # 🔒 Force CPU to avoid CUDA/A40 compatibility hell
-    device = "cpu"
+    # ✅ Use GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
     # Datasets

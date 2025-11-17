@@ -5,6 +5,25 @@ from typing import Dict, Any
 import numpy as np
 import torch
 from PIL import Image
+
+# ---------------------------------------------------------------------------
+# Compatibility shim for older PyTorch builds (e.g., some SCC modules).
+# Newer `transformers` versions expect `torch.utils._pytree.register_pytree_node`,
+# but older PyTorch exposes only `_register_pytree_node`. We alias it here
+# *before* importing transformers so their registration code succeeds.
+# ---------------------------------------------------------------------------
+try:  # pragma: no cover - environment-dependent
+    import torch.utils._pytree as _torch_pytree
+
+    if (
+        not hasattr(_torch_pytree, "register_pytree_node")
+        and hasattr(_torch_pytree, "_register_pytree_node")
+    ):
+        _torch_pytree.register_pytree_node = _torch_pytree._register_pytree_node
+except Exception:
+    # If anything goes wrong, just fall back; worst case we see the original error.
+    pass
+
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 # Resolve project root for consistent imports
