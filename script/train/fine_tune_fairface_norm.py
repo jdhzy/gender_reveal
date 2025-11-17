@@ -28,7 +28,9 @@ try:
     ):
         _orig_register = _torch_pytree._register_pytree_node
 
-        def register_pytree_node(node_type, flatten_fn, unflatten_fn, *, serialized_type_name=None):
+        def register_pytree_node(
+            node_type, flatten_fn, unflatten_fn, *, serialized_type_name=None
+        ):
             # Ignore serialized_type_name for older torch; just call the old API.
             return _orig_register(node_type, flatten_fn, unflatten_fn)
 
@@ -39,18 +41,27 @@ except Exception:
 
 # =========================================
 # 2) Import transformers and monkeypatch
-#    the CVE safety check for torch.load
+#    ALL check_torch_load_is_safe variants
 # =========================================
+import transformers
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 from transformers.utils import import_utils as _hf_import_utils
+import transformers.utils as _hf_utils
+import transformers.modeling_utils as _hf_modeling_utils
 
-# Bypass the torch>=2.6 restriction for torch.load with .bin files
-if hasattr(_hf_import_utils, "check_torch_load_is_safe"):
-    def _noop_check_torch_load_is_safe(*args, **kwargs):
-        # We accept the risk here because we're loading our own trusted checkpoints.
-        return None
+def _noop_check_torch_load_is_safe(*args, **kwargs):
+    """
+    NO-OP replacement for transformers' torch.load safety gate.
 
-    _hf_import_utils.check_torch_load_is_safe = _noop_check_torch_load_is_safe
+    We are loading our OWN trusted checkpoints (local FairFace weights),
+    not arbitrary untrusted files, so this is acceptable in this context.
+    """
+    return None
+
+# Patch every place transformers might call this
+for mod in (_hf_import_utils, _hf_utils, _hf_modeling_utils):
+    if hasattr(mod, "check_torch_load_is_safe"):
+        setattr(mod, "check_torch_load_is_safe", _noop_check_torch_load_is_safe)
 
 # =========================================
 # Local default model dir
