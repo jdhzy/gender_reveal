@@ -27,19 +27,20 @@ RACE_MAP = {
     5: "Southeast Asian",
     6: "White",
 }
-GENDER_MAP = {0: "female", 1: "male"}
+GENDER_MAP = {0: "male", 1: "female"}
 
 
 # --------------------
 # Helper functions
 # --------------------
-def pred_to_int(x):
-    x = str(x).lower()
-    if x in ["0", "female", "woman"]:
+def pred_to_int(x: str) -> int:
+    x = str(x).strip().lower()
+    if x in ["female", "woman", "0"]:
         return 0
-    if x in ["1", "male", "man"]:
+    elif x in ["male", "man", "1"]:
         return 1
-    return -1
+    else:
+        return -1
 
 
 def binomial_ci(p, n, z=1.96):
