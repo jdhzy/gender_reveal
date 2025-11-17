@@ -6,7 +6,7 @@ from typing import List
 import numpy as np
 import torch
 from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from PIL import Image
 import pandas as pd
 from tqdm import tqdm
@@ -240,6 +240,18 @@ def main():
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument(
+        "--max_train",
+        type=int,
+        default=None,
+        help="Optional: limit number of training examples (for quick tests).",
+    )
+    parser.add_argument(
+        "--max_val",
+        type=int,
+        default=None,
+        help="Optional: limit number of validation examples (for quick tests).",
+    )
 
     args = parser.parse_args()
 
@@ -250,17 +262,33 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # 🔒 Force CPU (A40 + old torch is messy)
-    device = "cpu"
+    # ✅ Use GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
     # Datasets
-    train_ds = FrontishFairFaceDataset(
+    full_train_ds = FrontishFairFaceDataset(
         args.data_root, split="train", use_skin_norm=True
     )
-    val_ds = FrontishFairFaceDataset(
+    full_val_ds = FrontishFairFaceDataset(
         args.data_root, split="validation", use_skin_norm=True
     )
+
+    if args.max_train is not None:
+        indices = list(range(min(args.max_train, len(full_train_ds))))
+        train_ds = Subset(full_train_ds, indices)
+        print(f"Using subset of TRAIN: {len(train_ds)} examples (max_train={args.max_train})")
+    else:
+        train_ds = full_train_ds
+        print(f"Using full TRAIN: {len(train_ds)} examples")
+
+    if args.max_val is not None:
+        indices = list(range(min(args.max_val, len(full_val_ds))))
+        val_ds = Subset(full_val_ds, indices)
+        print(f"Using subset of VAL: {len(val_ds)} examples (max_val={args.max_val})")
+    else:
+        val_ds = full_val_ds
+        print(f"Using full VAL: {len(val_ds)} examples")
 
     def collate_fn(batch):
         imgs = [b[0] for b in batch]
@@ -282,7 +310,7 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + "feature extractor" config (but we don't call HF FE directly)
+    # Model + "feature extractor" config (but we don't call HF FE directly at training time)
     print("Loading base model from:", args.model_dir)
     hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
     preprocessor = SimplePreprocessor(hf_feat)
