@@ -126,12 +126,27 @@ def compute_worst_group_accuracy(by_race_gender_df):
 # Plotting
 # --------------------
 def plot_overall(overall_df, out_path):
+    """
+    Bar chart of overall accuracy per condition with 95% CI error bars.
+    Expects columns: condition, acc, ci_low, ci_high
+    """
     plt.figure(figsize=(6, 4))
-    plt.bar(overall_df["condition"], overall_df["acc"])
+
+    conds = overall_df["condition"].tolist()
+    accs = overall_df["acc"].values
+    ci_low = overall_df["ci_low"].values
+    ci_high = overall_df["ci_high"].values
+
+    # error bar = distance from mean to CI bound
+    yerr = np.vstack([accs - ci_low, ci_high - accs])
+
+    x = np.arange(len(conds))
+
+    plt.bar(x, accs, yerr=yerr, capsize=4)
+    plt.xticks(x, conds, rotation=45)
     plt.ylim(0, 1)
     plt.ylabel("Accuracy")
-    plt.title("Overall Accuracy by Condition")
-    plt.xticks(rotation=45)
+    plt.title("Overall Accuracy by Condition (95% CI)")
     plt.tight_layout()
     plt.savefig(out_path)
     plt.close()
@@ -139,18 +154,49 @@ def plot_overall(overall_df, out_path):
 
 
 def plot_group(df, category, out_file):
+    """
+    Grouped bar chart with 95% CI error bars.
+
+    df: has columns [condition, <category>, acc, ci_low, ci_high]
+        e.g., category = "race_name" or "gender_name"
+    """
     plt.figure(figsize=(10, 4))
 
-    pivot = df.pivot_table(
-        index=category,
-        columns="condition",
-        values="acc",
-        aggfunc="mean",
-    )
+    groups = sorted(df[category].unique().tolist())
+    conds = sorted(df["condition"].unique().tolist())
 
-    pivot.plot(kind="bar", figsize=(10, 4))
+    x = np.arange(len(groups))
+    width = 0.8 / max(len(conds), 1)   # total bar cluster width ~= 0.8
+
+    for j, cond in enumerate(conds):
+        xs = x + (j - (len(conds)-1)/2) * width
+
+        accs = []
+        yerr_low = []
+        yerr_high = []
+
+        for g in groups:
+            sub = df[(df[category] == g) & (df["condition"] == cond)]
+            if len(sub) == 0:
+                accs.append(np.nan)
+                yerr_low.append(0.0)
+                yerr_high.append(0.0)
+            else:
+                acc = sub["acc"].iloc[0]
+                lo = sub["ci_low"].iloc[0]
+                hi = sub["ci_high"].iloc[0]
+                accs.append(acc)
+                yerr_low.append(acc - lo)
+                yerr_high.append(hi - acc)
+
+        yerr = np.vstack([yerr_low, yerr_high])
+        plt.bar(xs, accs, width, label=cond, yerr=yerr, capsize=3)
+
+    plt.xticks(x, groups, rotation=45, ha="right")
+    plt.ylim(0, 1)
     plt.ylabel("Accuracy")
-    plt.title(f"Accuracy by {category}")
+    plt.title(f"Accuracy by {category} (95% CI)")
+    plt.legend()
     plt.tight_layout()
     plt.savefig(out_file)
     plt.close()
