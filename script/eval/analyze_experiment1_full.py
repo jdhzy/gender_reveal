@@ -27,7 +27,10 @@ RACE_MAP = {
     5: "Southeast Asian",
     6: "White",
 }
-GENDER_MAP = {0: "male", 1: "female"}
+GENDER_MAP = {
+    0: "female",
+    1: "male",
+}
 
 
 # --------------------
@@ -35,9 +38,9 @@ GENDER_MAP = {0: "male", 1: "female"}
 # --------------------
 def pred_to_int(x: str) -> int:
     x = str(x).strip().lower()
-    if x in ["female", "woman", "0"]:
+    if x in ["male", "man", "0"]:
         return 0
-    elif x in ["male", "man", "1"]:
+    elif x in ["female", "woman", "1"]:
         return 1
     else:
         return -1
