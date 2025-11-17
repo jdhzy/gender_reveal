@@ -1,20 +1,24 @@
 #!/bin/bash
-#$ -N ff_train_norm_cpu
+#$ -N ff_train_norm_gpu
 #$ -P cs599dg
 #$ -l h_rt=12:00:00
 #$ -l h_vmem=16G
+#$ -l mem_free=32G
 #$ -pe omp 4
+#$ -l gpus=1
+#$ -l gpu_t=A40
 #$ -j y
-#$ -o batchJob/logs/log_ff_train_norm_cpu.txt
+#$ -o batchJob/logs/log_ff_train_norm_gpu.txt
 #$ -cwd
-#$ -l no_gpu=TRUE
 
 echo "Host: $(hostname)"
-echo "Starting fine-tuning on CPU..."
+echo "Starting fine-tuning on GPU..."
+echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 
-# Use your existing venv (Python 3.6)
+# Activate your venv
 source venv/bin/activate
 
+# Thread env (good hygiene, even on GPU)
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 export OPENBLAS_NUM_THREADS=4
@@ -23,7 +27,7 @@ export NUMEXPR_NUM_THREADS=4
 python script/train/fine_tune_fairface_norm.py \
   --data_root data/cleaned/frontish \
   --model_dir metadata/models/fairface_gender_image_detection_pt2 \
-  --out_dir metadata/models/fairface_gender_image_detection_norm_ft \
+  --out_dir metadata/models/fairface_gender_image_detection_norm_ft_full \
   --batch_size 32 \
   --epochs 3 \
   --lr 1e-4 \
