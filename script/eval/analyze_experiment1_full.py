@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from script.eval.analyze_fairface_results import plot_overall
 
 # --------------------
 # Path setup
@@ -90,6 +89,18 @@ def summarize(df, group_cols):
 # --------------------
 # Plotting
 # --------------------
+def plot_overall(overall_df, out_path):
+    plt.figure(figsize=(6, 4))
+    plt.bar(overall_df["condition"], overall_df["acc"])
+    plt.ylim(0, 1)
+    plt.ylabel("Accuracy")
+    plt.title("Overall Accuracy by Condition")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_path)
+    plt.close()
+    print("Saved:", out_path)
+    
 def plot_group(df, category, out_file):
     plt.figure(figsize=(10, 4))
 
