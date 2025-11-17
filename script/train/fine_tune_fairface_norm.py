@@ -16,23 +16,16 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
-from script.data_processing.transforms import normalize_skintone
-from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
-
-
-# -----------------------------
+# =========================================
 # Monkeypatch torch.utils._pytree
-# for transformers compatibility if needed
-# -----------------------------
+# BEFORE importing transformers
+# =========================================
 try:
     import torch.utils._pytree as _torch_pytree
 
-    # Newer transformers (and torch>=2.1) expect register_pytree_node with
-    # a serialized_type_name kwarg. Old torch only has _register_pytree_node
-    # without that kwarg. This wrapper drops the extra kwarg if present.
-    if hasattr(_torch_pytree, "_register_pytree_node"):
-
+    if hasattr(_torch_pytree, "_register_pytree_node") and not hasattr(
+        _torch_pytree, "register_pytree_node"
+    ):
         _orig_register = _torch_pytree._register_pytree_node
 
         def register_pytree_node(node_type, flatten_fn, unflatten_fn, *, serialized_type_name=None):
@@ -43,6 +36,18 @@ try:
 except Exception:
     # If anything fails here, we just fall back to the default behavior.
     pass
+
+# Now it is safe to import transformers
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+
+# =========================================
+# Local default model dir (no fairface_hf_model import)
+# =========================================
+DEFAULT_MODEL_DIR = os.path.join(
+    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_pt2"
+)
+
+from script.data_processing.transforms import normalize_skintone
 
 
 # -----------------------------
@@ -286,7 +291,6 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # Prefer GPU if available (for A40 runs)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
@@ -327,7 +331,6 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + "feature extractor" config (but we don't call HF FE directly)
     print("Loading base model from:", args.model_dir)
     hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
     preprocessor = SimplePreprocessor(hf_feat)
