@@ -1,7 +1,7 @@
 import os
 import sys
 import argparse
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -11,66 +11,16 @@ from PIL import Image
 import pandas as pd
 from tqdm import tqdm
 
-# --- Path setup ---
+# -----------------------------
+# Path setup
+# -----------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
-# =========================================
-# 1) Monkeypatch torch.utils._pytree
-#    BEFORE importing transformers
-# =========================================
-try:
-    import torch.utils._pytree as _torch_pytree
-
-    if hasattr(_torch_pytree, "_register_pytree_node") and not hasattr(
-        _torch_pytree, "register_pytree_node"
-    ):
-        _orig_register = _torch_pytree._register_pytree_node
-
-        def register_pytree_node(
-            node_type, flatten_fn, unflatten_fn, *, serialized_type_name=None
-        ):
-            # Ignore serialized_type_name for older torch; just call the old API.
-            return _orig_register(node_type, flatten_fn, unflatten_fn)
-
-        _torch_pytree.register_pytree_node = register_pytree_node
-except Exception:
-    # If anything fails here, just skip the patch.
-    pass
-
-# =========================================
-# 2) Import transformers and monkeypatch
-#    ALL check_torch_load_is_safe variants
-# =========================================
-import transformers
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
-from transformers.utils import import_utils as _hf_import_utils
-import transformers.utils as _hf_utils
-import transformers.modeling_utils as _hf_modeling_utils
-
-def _noop_check_torch_load_is_safe(*args, **kwargs):
-    """
-    NO-OP replacement for transformers' torch.load safety gate.
-
-    We are loading our OWN trusted checkpoints (local FairFace weights),
-    not arbitrary untrusted files, so this is acceptable in this context.
-    """
-    return None
-
-# Patch every place transformers might call this
-for mod in (_hf_import_utils, _hf_utils, _hf_modeling_utils):
-    if hasattr(mod, "check_torch_load_is_safe"):
-        setattr(mod, "check_torch_load_is_safe", _noop_check_torch_load_is_safe)
-
-# =========================================
-# Local default model dir
-# =========================================
-DEFAULT_MODEL_DIR = os.path.join(
-    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_pt2"
-)
-
 from script.data_processing.transforms import normalize_skintone
+from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR  # just for default
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 
 # -----------------------------
@@ -108,7 +58,7 @@ class FrontishFairFaceDataset(Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Tuple[Image.Image, int]:
         row = self.df.iloc[idx]
         filename = row["filename"]
         label = int(row["gender"])  # 0/1
@@ -138,7 +88,9 @@ def freeze_backbone(model: nn.Module):
         for p in model.classifier.parameters():
             p.requires_grad = True
     else:
-        print("[WARN] Model has no `.classifier` attribute; check architecture.")
+        print("[WARN] Model has no `.classifier` attribute; training entire model.")
+        for p in model.parameters():
+            p.requires_grad = True
 
 
 # -----------------------------
@@ -263,6 +215,9 @@ def eval_epoch(model, preprocessor, loader, device: str = "cpu"):
     return total_loss / total_examples, total_correct / total_examples
 
 
+# -----------------------------
+# Main
+# -----------------------------
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -289,35 +244,32 @@ def main():
         help="Where to save fine-tuned model (HF format).",
     )
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--max_train",
-        type=int,
-        default=None,
-        help="Optional cap on number of training examples (for quick runs).",
-    )
-    parser.add_argument(
-        "--max_val",
-        type=int,
-        default=None,
-        help="Optional cap on number of validation examples.",
-    )
+    parser.add_argument("--max_train", type=int, default=None,
+                        help="Optional cap on number of training examples.")
+    parser.add_argument("--max_val", type=int, default=None,
+                        help="Optional cap on number of validation examples.")
 
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
 
+    # -----------------------------
+    # Device (GPU if available)
+    # -----------------------------
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     print("=== Fine-tuning FairFace on SKIN-NORMALIZED TRAIN images ===")
     print("Data root :", args.data_root)
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
+    # -----------------------------
     # Datasets
+    # -----------------------------
     train_ds = FrontishFairFaceDataset(
         args.data_root, split="train", use_skin_norm=True
     )
@@ -325,13 +277,17 @@ def main():
         args.data_root, split="validation", use_skin_norm=True
     )
 
-    # Optional subsampling for quicker runs
+    # Optional subsampling for faster experiments
+    rng = np.random.RandomState(0)
+
     if args.max_train is not None and args.max_train < len(train_ds):
-        train_ds = Subset(train_ds, list(range(args.max_train)))
+        idx_train = rng.choice(len(train_ds), size=args.max_train, replace=False)
+        train_ds = Subset(train_ds, idx_train)
         print(f"Using subset of TRAIN: {len(train_ds)} examples (max_train={args.max_train})")
 
     if args.max_val is not None and args.max_val < len(val_ds):
-        val_ds = Subset(val_ds, list(range(args.max_val)))
+        idx_val = rng.choice(len(val_ds), size=args.max_val, replace=False)
+        val_ds = Subset(val_ds, idx_val)
         print(f"Using subset of VAL: {len(val_ds)} examples (max_val={args.max_val})")
 
     def collate_fn(batch):
@@ -354,6 +310,9 @@ def main():
         collate_fn=collate_fn,
     )
 
+    # -----------------------------
+    # Model + preprocessor
+    # -----------------------------
     print("Loading base model from:", args.model_dir)
     hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
     preprocessor = SimplePreprocessor(hf_feat)
@@ -361,7 +320,7 @@ def main():
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
 
-    # Only train classifier head
+    # Freeze backbone: only train classifier head
     freeze_backbone(model)
 
     optimizer = optim.Adam(
@@ -371,6 +330,9 @@ def main():
 
     best_val_acc = 0.0
 
+    # -----------------------------
+    # Training loop
+    # -----------------------------
     for epoch in range(1, args.epochs + 1):
         print(f"\n--- Epoch {epoch}/{args.epochs} ---")
         train_loss, train_acc = train_epoch(
@@ -386,10 +348,15 @@ def main():
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             print(
-                f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ..."
+                f"[BEST] New best val acc = {best_val_acc:.4f}."
             )
-            model.save_pretrained(args.out_dir)
-            hf_feat.save_pretrained(args.out_dir)
+
+    # -----------------------------
+    # ALWAYS save final model
+    # -----------------------------
+    print(f"Saving FINAL model to {args.out_dir} ...")
+    model.save_pretrained(args.out_dir)
+    hf_feat.save_pretrained(args.out_dir)
 
     print("Done. Best val acc:", best_val_acc)
     print("Fine-tuned model saved in:", args.out_dir)
