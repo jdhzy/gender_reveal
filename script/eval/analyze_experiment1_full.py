@@ -104,7 +104,24 @@ def summarize(df, group_cols: List[str]) -> pd.DataFrame:
         rows.append(row)
     return pd.DataFrame(rows).sort_values(group_cols)
 
-
+def compute_worst_group_accuracy(by_race_gender_df):
+    """
+    Computes Worst-Group Accuracy (WGA) for each condition.
+    by_race_gender_df must include:
+        condition, race_name, gender_name, acc
+    """
+    wga_rows = []
+    for cond, sub in by_race_gender_df.groupby("condition"):
+        # find min accuracy across all race × gender groups
+        min_row = sub.loc[sub["acc"].idxmin()]
+        wga_rows.append({
+            "condition": cond,
+            "worst_group_race": min_row["race_name"],
+            "worst_group_gender": min_row["gender_name"],
+            "worst_group_acc": min_row["acc"],
+            "worst_group_n": min_row["n"]
+        })
+    return pd.DataFrame(wga_rows).sort_values("condition")
 # --------------------
 # Plotting
 # --------------------
@@ -139,6 +156,17 @@ def plot_group(df, category, out_file):
     plt.close()
     print("Saved:", out_file)
 
+def plot_wga(wga_df, out_file):
+    plt.figure(figsize=(6,4))
+    plt.bar(wga_df["condition"], wga_df["worst_group_acc"])
+    plt.ylim(0,1)
+    plt.ylabel("Worst-Group Accuracy")
+    plt.title("WGA: Worst-Performing Race × Gender Group")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(out_file)
+    plt.close()
+    print("Saved:", out_file)
 
 # --------------------
 # Main
@@ -225,6 +253,15 @@ def main():
     )
 
     # ---------------------------------------------
+    # Worst-Group Accuracy (WGA)
+    # ---------------------------------------------
+    wga_df = compute_worst_group_accuracy(by_race_gender)
+    wga_df.to_csv(os.path.join(args.out_dir, "exp1_full_worst_group_accuracy.csv"), index=False)
+
+    print("\n=== WORST-GROUP ACCURACY (WGA) ===")
+    print(wga_df)
+
+    # ---------------------------------------------
     # Plots
     # ---------------------------------------------
     plot_overall(
@@ -243,6 +280,8 @@ def main():
         "gender_name",
         os.path.join(args.out_dir, "exp1_full_plot_gender.png"),
     )
+
+    plot_wga(wga_df, os.path.join(args.out_dir, "exp1_full_plot_wga.png"))
 
     print("\nAll done! Full Experiment 1A + 1B analysis generated.")
 
