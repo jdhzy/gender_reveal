@@ -18,7 +18,7 @@ sys.path.append(PROJECT_ROOT)
 
 from script.data_processing.transforms import normalize_skintone
 from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
 
 # -----------------------------
@@ -28,10 +28,10 @@ class FrontishFairFaceDataset(Dataset):
     """
     Expects:
       data/cleaned/frontish/<split>/
-        - labels.csv      (with columns: filename, gender, race)
+        - labels.csv      (columns: filename, gender, race)
         - <images...>     (filenames in labels.csv)
 
-    We do NOT store normalized images on disk.
+    We DO NOT store normalized images on disk.
     We apply normalize_skintone() on the fly.
     """
 
@@ -94,15 +94,15 @@ def freeze_backbone(model: nn.Module):
 # -----------------------------
 class SimplePreprocessor:
     """
-    Re-implements the essential part of the HF image processor for training:
+    Re-implements the essential part of the HF feature extractor for training:
       - resize to expected size
       - convert to tensor
       - normalize by image_mean / image_std
     """
 
-    def __init__(self, proc):
+    def __init__(self, feat_extractor):
         # --- size handling ---
-        sz = getattr(proc, "size", 224)
+        sz = getattr(feat_extractor, "size", 224)
 
         # Normalize size into (H, W) ints
         if isinstance(sz, dict):
@@ -120,8 +120,8 @@ class SimplePreprocessor:
         self.width = int(w)
 
         # --- mean/std ---
-        self.mean = getattr(proc, "image_mean", [0.5, 0.5, 0.5])
-        self.std = getattr(proc, "image_std", [0.5, 0.5, 0.5])
+        self.mean = getattr(feat_extractor, "image_mean", [0.5, 0.5, 0.5])
+        self.std = getattr(feat_extractor, "image_std", [0.5, 0.5, 0.5])
 
         # make them tensors (for broadcasting)
         self.mean_tensor = torch.tensor(self.mean).view(3, 1, 1)
@@ -237,20 +237,20 @@ def main():
         help="Where to save fine-tuned model (HF format).",
     )
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--max_train",
         type=int,
-        default=None,
-        help="Optional: limit number of training examples (for quick tests).",
+        default=2000,
+        help="Optional cap on number of training examples (for speed).",
     )
     parser.add_argument(
         "--max_val",
         type=int,
-        default=None,
-        help="Optional: limit number of validation examples (for quick tests).",
+        default=1000,
+        help="Optional cap on number of validation examples.",
     )
 
     args = parser.parse_args()
@@ -262,8 +262,8 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # Use GPU if available
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 🔒 Force CPU to avoid CUDA/A40 compatibility hell
+    device = "cpu"
     print("Device    :", device)
 
     # Datasets
@@ -274,21 +274,22 @@ def main():
         args.data_root, split="validation", use_skin_norm=True
     )
 
-    if args.max_train is not None:
-        indices = list(range(min(args.max_train, len(full_train_ds))))
-        train_ds = Subset(full_train_ds, indices)
+    # Optional subsampling for speed
+    if args.max_train is not None and args.max_train < len(full_train_ds):
+        train_indices = list(range(args.max_train))
+        train_ds = Subset(full_train_ds, train_indices)
         print(f"Using subset of TRAIN: {len(train_ds)} examples (max_train={args.max_train})")
     else:
         train_ds = full_train_ds
-        print(f"Using full TRAIN: {len(train_ds)} examples")
+        print(f"Using FULL TRAIN: {len(train_ds)} examples")
 
-    if args.max_val is not None:
-        indices = list(range(min(args.max_val, len(full_val_ds))))
-        val_ds = Subset(full_val_ds, indices)
+    if args.max_val is not None and args.max_val < len(full_val_ds):
+        val_indices = list(range(args.max_val))
+        val_ds = Subset(full_val_ds, val_indices)
         print(f"Using subset of VAL: {len(val_ds)} examples (max_val={args.max_val})")
     else:
         val_ds = full_val_ds
-        print(f"Using full VAL: {len(val_ds)} examples")
+        print(f"Using FULL VAL: {len(val_ds)} examples")
 
     def collate_fn(batch):
         imgs = [b[0] for b in batch]
@@ -310,10 +311,10 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + image processor config
+    # Model + feature extractor config (but we don't use HF FE in the loop)
     print("Loading base model from:", args.model_dir)
-    hf_proc = AutoImageProcessor.from_pretrained(args.model_dir)
-    preprocessor = SimplePreprocessor(hf_proc)
+    hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
+    preprocessor = SimplePreprocessor(hf_feat)
 
     model = AutoModelForImageClassification.from_pretrained(args.model_dir)
     model.to(device)
@@ -346,7 +347,7 @@ def main():
                 f"New best val acc = {best_val_acc:.4f}. Saving to {args.out_dir} ..."
             )
             model.save_pretrained(args.out_dir)
-            hf_proc.save_pretrained(args.out_dir)
+            hf_feat.save_pretrained(args.out_dir)
 
     print("Done. Best val acc:", best_val_acc)
     print("Fine-tuned model saved in:", args.out_dir)
