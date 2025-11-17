@@ -1,17 +1,29 @@
-# Data processing libraries
-datasets
-Pillow
-tqdm
-numpy
-pandas
-matplotlib
+# ===========================
+# HuggingFace / Models
+# ===========================
+transformers>=4.45.2
+huggingface_hub>=0.24.6
+safetensors>=0.4.5
+tokenizers>=0.19.1
 
-# Data cleaning libraries
-## Keep only frontal-ish faces
-opencv-python==4.5.5.64
+# ===========================
+# Core PyTorch Stack
+# ===========================
+# NOTE: DO NOT pip install torch/torchvision on SCC.
+# Use: module load pytorch/2.x
+#torch
+#torchvision
 
-# API libraries
-torch
-torchvision
-transformers
-huggingface_hub
+# ===========================
+# Utilities & Data Handling
+# ===========================
+numpy>=1.26,<2.0
+pandas>=2.2.0
+Pillow>=10.3.0
+tqdm>=4.66.0
+opencv-python>=4.10.0
+
+# ===========================
+# Optional / helpers
+# ===========================
+einops>=0.7.0
