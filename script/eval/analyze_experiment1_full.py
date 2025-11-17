@@ -90,7 +90,15 @@ def summarize(df, group_cols):
 # --------------------
 def plot_group(df, category, out_file):
     plt.figure(figsize=(10, 4))
-    pivot = df.pivot(index=category, columns="condition", values="acc")
+
+    # Use pivot_table instead of pivot to avoid duplicate-column crash
+    pivot = df.pivot_table(
+        index=category,
+        columns="condition",
+        values="acc",
+        aggfunc="mean"     # safe even if duplicates exist
+    )
+
     pivot.plot(kind="bar", figsize=(10, 4))
     plt.ylabel("Accuracy")
     plt.title(f"Accuracy by {category}")
