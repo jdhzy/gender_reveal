@@ -23,8 +23,6 @@ def load_split(data_root: str, split: str):
     Expects:
         <data_root>/<split>/labels.csv
         <data_root>/<split>/<image files...>
-
-    (Adjust if your images live in an 'images/' subfolder.)
     """
     base_dir = os.path.join(data_root, split)
     csv_path = os.path.join(base_dir, "labels.csv")
@@ -43,7 +41,9 @@ def load_split(data_root: str, split: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate HF FairFace gender model on a subset.")
+    parser = argparse.ArgumentParser(
+        description="Evaluate HF FairFace gender model on a subset."
+    )
     parser.add_argument(
         "--split",
         default="validation",
@@ -63,7 +63,8 @@ def main():
     parser.add_argument(
         "--data_root",
         default=None,
-        help="Root directory containing <split>/labels.csv. Default: data/cleaned/frontish",
+        help="Root directory containing <split>/labels.csv. "
+             "Default: data/cleaned/frontish",
     )
     parser.add_argument(
         "--max_images",
@@ -115,14 +116,16 @@ def main():
         try:
             img = Image.open(img_path).convert("RGB")
         except Exception as e:
-            results.append({
-                "filename": filename,
-                "true_gender": row.get("gender", ""),
-                "true_race": row.get("race", ""),
-                "api_pred": "error",
-                "raw": None,
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "filename": filename,
+                    "true_gender": row.get("gender", ""),
+                    "true_race": row.get("race", ""),
+                    "api_pred": "error",
+                    "raw": None,
+                    "error": str(e),
+                }
+            )
             continue
 
         if args.use_norm:
@@ -131,17 +134,21 @@ def main():
         pred_dict = model.predict_gender(img)
         pred_label = pred_dict.get("pred_label", "unknown")
 
-        results.append({
-            "filename": filename,
-            "true_gender": row.get("gender", ""),
-            "true_race": row.get("race", ""),
-            "api_pred": pred_label,
-            "raw": pred_dict.get("raw"),
-        })
+        results.append(
+            {
+                "filename": filename,
+                "true_gender": row.get("gender", ""),
+                "true_race": row.get("race", ""),
+                "api_pred": pred_label,
+                "raw": pred_dict.get("raw"),
+                "error": "",
+            }
+        )
 
         count += 1
 
-    fieldnames = ["filename", "true_gender", "true_race", "api_pred", "raw"]
+    # 🔧 include "error" so DictWriter is happy
+    fieldnames = ["filename", "true_gender", "true_race", "api_pred", "raw", "error"]
     os.makedirs(os.path.dirname(args.out_csv), exist_ok=True)
     with open(args.out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
