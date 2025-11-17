@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from script.eval.analyze_fairface_results import plot_overall
+
 # --------------------
 # Path setup
 # --------------------
@@ -169,8 +171,7 @@ def main():
     # ---------------------------------------------
     # Plots
     # ---------------------------------------------
-    plot_group(overall, "condition",
-               os.path.join(args.out_dir, "exp1_full_plot_overall.png"))
+    plot_overall(overall, os.path.join(args.out_dir, "exp1_full_plot_overall.png"))
 
     plot_group(by_race, "race_name",
                os.path.join(args.out_dir, "exp1_full_plot_race.png"))
