@@ -17,33 +17,32 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 sys.path.append(PROJECT_ROOT)
 
 from script.data_processing.transforms import normalize_skintone
+from script.apis.fairface_hf_model import DEFAULT_MODEL_DIR
+from transformers import AutoFeatureExtractor, AutoModelForImageClassification
 
-# -----------------------------
-# Define DEFAULT_MODEL_DIR here
-# (avoid importing fairface_hf_model, which pulls in transformers too early)
-# -----------------------------
-DEFAULT_MODEL_DIR = os.path.join(
-    PROJECT_ROOT, "metadata", "models", "fairface_gender_image_detection_pt2"
-)
 
 # -----------------------------
 # Monkeypatch torch.utils._pytree
-# for transformers compatibility (old vs new torch)
+# for transformers compatibility if needed
 # -----------------------------
 try:
     import torch.utils._pytree as _torch_pytree
 
-    if (
-        hasattr(_torch_pytree, "_register_pytree_node")
-        and not hasattr(_torch_pytree, "register_pytree_node")
-    ):
-        # Make transformers happy: alias the old name to the new one.
-        _torch_pytree.register_pytree_node = _torch_pytree._register_pytree_node
-except Exception:
-    # If anything goes wrong, just continue; worst case we see the same error.
-    pass
+    # Newer transformers (and torch>=2.1) expect register_pytree_node with
+    # a serialized_type_name kwarg. Old torch only has _register_pytree_node
+    # without that kwarg. This wrapper drops the extra kwarg if present.
+    if hasattr(_torch_pytree, "_register_pytree_node"):
 
-from transformers import AutoFeatureExtractor, AutoModelForImageClassification
+        _orig_register = _torch_pytree._register_pytree_node
+
+        def register_pytree_node(node_type, flatten_fn, unflatten_fn, *, serialized_type_name=None):
+            # Ignore serialized_type_name for older torch; just call the old API.
+            return _orig_register(node_type, flatten_fn, unflatten_fn)
+
+        _torch_pytree.register_pytree_node = register_pytree_node
+except Exception:
+    # If anything fails here, we just fall back to the default behavior.
+    pass
 
 
 # -----------------------------
@@ -262,19 +261,19 @@ def main():
         help="Where to save fine-tuned model (HF format).",
     )
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--max_train",
         type=int,
-        default=2000,
-        help="Optional cap on number of training examples (for speed).",
+        default=None,
+        help="Optional cap on number of training examples (for quick runs).",
     )
     parser.add_argument(
         "--max_val",
         type=int,
-        default=1000,
+        default=None,
         help="Optional cap on number of validation examples.",
     )
 
@@ -287,34 +286,26 @@ def main():
     print("Model dir :", args.model_dir)
     print("Out dir   :", args.out_dir)
 
-    # ✅ Use GPU if available
+    # Prefer GPU if available (for A40 runs)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print("Device    :", device)
 
     # Datasets
-    full_train_ds = FrontishFairFaceDataset(
+    train_ds = FrontishFairFaceDataset(
         args.data_root, split="train", use_skin_norm=True
     )
-    full_val_ds = FrontishFairFaceDataset(
+    val_ds = FrontishFairFaceDataset(
         args.data_root, split="validation", use_skin_norm=True
     )
 
-    # Optional subsampling for speed
-    if args.max_train is not None and args.max_train < len(full_train_ds):
-        train_indices = list(range(args.max_train))
-        train_ds = Subset(full_train_ds, train_indices)
+    # Optional subsampling for quicker runs
+    if args.max_train is not None and args.max_train < len(train_ds):
+        train_ds = Subset(train_ds, list(range(args.max_train)))
         print(f"Using subset of TRAIN: {len(train_ds)} examples (max_train={args.max_train})")
-    else:
-        train_ds = full_train_ds
-        print(f"Using FULL TRAIN: {len(train_ds)} examples")
 
-    if args.max_val is not None and args.max_val < len(full_val_ds):
-        val_indices = list(range(args.max_val))
-        val_ds = Subset(full_val_ds, val_indices)
+    if args.max_val is not None and args.max_val < len(val_ds):
+        val_ds = Subset(val_ds, list(range(args.max_val)))
         print(f"Using subset of VAL: {len(val_ds)} examples (max_val={args.max_val})")
-    else:
-        val_ds = full_val_ds
-        print(f"Using FULL VAL: {len(val_ds)} examples")
 
     def collate_fn(batch):
         imgs = [b[0] for b in batch]
@@ -336,7 +327,7 @@ def main():
         collate_fn=collate_fn,
     )
 
-    # Model + feature extractor config (but we don't use HF FE in the loop)
+    # Model + "feature extractor" config (but we don't call HF FE directly)
     print("Loading base model from:", args.model_dir)
     hf_feat = AutoFeatureExtractor.from_pretrained(args.model_dir)
     preprocessor = SimplePreprocessor(hf_feat)
