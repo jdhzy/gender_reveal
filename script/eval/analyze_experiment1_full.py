@@ -27,9 +27,11 @@ RACE_MAP = {
     5: "Southeast Asian",
     6: "White",
 }
+
+# FairFace convention: 0 = male, 1 = female
 GENDER_MAP = {
-    0: "female",
-    1: "male",
+    0: "male",
+    1: "female",
 }
 
 
@@ -37,6 +39,10 @@ GENDER_MAP = {
 # Helper functions
 # --------------------
 def pred_to_int(x: str) -> int:
+    """
+    Map string predictions to integer labels consistent with FairFace:
+      0 = male, 1 = female
+    """
     x = str(x).strip().lower()
     if x in ["male", "man", "0"]:
         return 0
@@ -59,19 +65,26 @@ def binomial_ci(p, n, z=1.96):
 def load_condition(csv_path, condition_name):
     df = pd.read_csv(csv_path)
     df["condition"] = condition_name
-    df["pred_int"] = df["api_pred"].apply(pred_to_int)
+
+    # labels: FairFace uses 0 = male, 1 = female
     df["true_gender"] = df["true_gender"].astype(int)
     df["true_race"] = df["true_race"].astype(int)
+
+    # decode predictions
+    df["pred_int"] = df["api_pred"].apply(pred_to_int)
+
+    # pretty names
     df["race_name"] = df["true_race"].map(RACE_MAP)
     df["gender_name"] = df["true_gender"].map(GENDER_MAP)
-    df["correct"] = df["pred_int"] == df["true_gender"]
+
+    # correctness will be (re)computed after we optionally flip normft preds
     return df
 
 
 # --------------------
 # Aggregation
 # --------------------
-def summarize(df, group_cols):
+def summarize(df, group_cols: List[str]) -> pd.DataFrame:
     rows = []
     for keys, sub in df.groupby(group_cols):
         if not isinstance(keys, tuple):
@@ -80,12 +93,14 @@ def summarize(df, group_cols):
         acc = sub["correct"].mean()
         lo, hi = binomial_ci(acc, n)
         row = {col: keys[i] for i, col in enumerate(group_cols)}
-        row.update({
-            "n": n,
-            "acc": acc,
-            "ci_low": lo,
-            "ci_high": hi
-        })
+        row.update(
+            {
+                "n": n,
+                "acc": acc,
+                "ci_low": lo,
+                "ci_high": hi,
+            }
+        )
         rows.append(row)
     return pd.DataFrame(rows).sort_values(group_cols)
 
@@ -104,16 +119,16 @@ def plot_overall(overall_df, out_path):
     plt.savefig(out_path)
     plt.close()
     print("Saved:", out_path)
-    
+
+
 def plot_group(df, category, out_file):
     plt.figure(figsize=(10, 4))
 
-    # Use pivot_table instead of pivot to avoid duplicate-column crash
     pivot = df.pivot_table(
         index=category,
         columns="condition",
         values="acc",
-        aggfunc="mean"     # safe even if duplicates exist
+        aggfunc="mean",
     )
 
     pivot.plot(kind="bar", figsize=(10, 4))
@@ -129,19 +144,26 @@ def plot_group(df, category, out_file):
 # Main
 # --------------------
 def main():
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--out_dir", type=str, default=RESULTS_DIR)
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
     # ---------------------------------------------
-    # File paths (update if your filenames differ)
+    # File paths
     # ---------------------------------------------
-    base_rgb_csv = os.path.join(RESULTS_DIR, "hf_fairface_gender_frontish_validation.csv")
-    base_norm_csv = os.path.join(RESULTS_DIR, "hf_fairface_gender_frontish_validation_norm.csv")
-    normft_rgb_csv = os.path.join(RESULTS_DIR, "ff_norm_ft_full_eval_on_rgb.csv")
-    normft_norm_csv = os.path.join(RESULTS_DIR, "ff_norm_ft_full_eval_on_norm.csv")
+    base_rgb_csv = os.path.join(
+        RESULTS_DIR, "hf_fairface_gender_frontish_validation.csv"
+    )
+    base_norm_csv = os.path.join(
+        RESULTS_DIR, "hf_fairface_gender_frontish_validation_norm.csv"
+    )
+    normft_rgb_csv = os.path.join(
+        RESULTS_DIR, "ff_norm_ft_full_eval_on_rgb.csv"
+    )
+    normft_norm_csv = os.path.join(
+        RESULTS_DIR, "ff_norm_ft_full_eval_on_norm.csv"
+    )
 
     # ---------------------------------------------
     # Load all 4 conditions
@@ -155,6 +177,16 @@ def main():
 
     df = pd.concat(df_list, ignore_index=True)
 
+    # ---------------------------------------------
+    # FIX: flip fine-tuned predictions (normft_*)
+    # ---------------------------------------------
+    mask_normft = df["condition"].isin(["normft_rgb", "normft_norm"])
+    # For binary 0/1 labels: flipped_pred = 1 - pred
+    df.loc[mask_normft, "pred_int"] = 1 - df.loc[mask_normft, "pred_int"]
+
+    # Now compute correctness with aligned labels
+    df["correct"] = df["pred_int"] == df["true_gender"]
+
     print(df["condition"].value_counts())
 
     # ---------------------------------------------
@@ -163,36 +195,54 @@ def main():
     overall = summarize(df, ["condition"])
     print("\n=== OVERALL ===")
     print(overall)
-    overall.to_csv(os.path.join(args.out_dir, "exp1_full_overall.csv"), index=False)
+    overall.to_csv(
+        os.path.join(args.out_dir, "exp1_full_overall.csv"), index=False
+    )
 
     # ---------------------------------------------
     # By race
     # ---------------------------------------------
     by_race = summarize(df, ["condition", "race_name"])
-    by_race.to_csv(os.path.join(args.out_dir, "exp1_full_by_race.csv"), index=False)
+    by_race.to_csv(
+        os.path.join(args.out_dir, "exp1_full_by_race.csv"), index=False
+    )
 
     # ---------------------------------------------
     # By gender
     # ---------------------------------------------
     by_gender = summarize(df, ["condition", "gender_name"])
-    by_gender.to_csv(os.path.join(args.out_dir, "exp1_full_by_gender.csv"), index=False)
+    by_gender.to_csv(
+        os.path.join(args.out_dir, "exp1_full_by_gender.csv"), index=False
+    )
 
     # ---------------------------------------------
     # By race × gender
     # ---------------------------------------------
     by_race_gender = summarize(df, ["condition", "race_name", "gender_name"])
-    by_race_gender.to_csv(os.path.join(args.out_dir, "exp1_full_by_race_gender.csv"), index=False)
+    by_race_gender.to_csv(
+        os.path.join(args.out_dir, "exp1_full_by_race_gender.csv"),
+        index=False,
+    )
 
     # ---------------------------------------------
     # Plots
     # ---------------------------------------------
-    plot_overall(overall, os.path.join(args.out_dir, "exp1_full_plot_overall.png"))
+    plot_overall(
+        overall,
+        os.path.join(args.out_dir, "exp1_full_plot_overall.png"),
+    )
 
-    plot_group(by_race, "race_name",
-               os.path.join(args.out_dir, "exp1_full_plot_race.png"))
+    plot_group(
+        by_race,
+        "race_name",
+        os.path.join(args.out_dir, "exp1_full_plot_race.png"),
+    )
 
-    plot_group(by_gender, "gender_name",
-               os.path.join(args.out_dir, "exp1_full_plot_gender.png"))
+    plot_group(
+        by_gender,
+        "gender_name",
+        os.path.join(args.out_dir, "exp1_full_plot_gender.png"),
+    )
 
     print("\nAll done! Full Experiment 1A + 1B analysis generated.")
 
