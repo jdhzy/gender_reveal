@@ -32,8 +32,8 @@ RACE_MAP = {
 
 # Convention we’re using everywhere now: 0 = female, 1 = male
 GENDER_MAP = {
-    0: "female",
-    1: "male",
+    0: "male",
+    1: "female",
 }
 
 
@@ -42,16 +42,16 @@ GENDER_MAP = {
 # --------------------
 def pred_to_int(x: str) -> int:
     """
-    Map string prediction labels to {0,1} using our convention:
-      0 = female, 1 = male
+    Map string predictions to integer labels consistent with FairFace:
+      0 = male, 1 = female
     """
     x = str(x).strip().lower()
-    if x in ["female", "woman", "0"]:
+    if x in ["male", "man", "0"]:
         return 0
-    elif x in ["male", "man", "1"]:
+    elif x in ["female", "woman", "1"]:
         return 1
     else:
-        return -1  # unknown / error
+        return -1
 
 
 def binomial_ci(p: float, n: int, z: float = 1.96):
