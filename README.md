@@ -23,9 +23,11 @@ Pipeline to study how simple skin-tone normalization affects gender classificati
 - Download the FairFace dataset into `data/fairface/` (the download script below will do this automatically), so you end up with `data/fairface/train/` and `data/fairface/validation/` plus their `labels.csv` files.
 
 ## Data pipeline
-1) **Download FairFace:**  
+1) **Download FairFace (from HuggingFaceM4/FairFace):**  
    `python script/data_processing/fetch_FF_data.py --version 1.25`  
-   Saves JPEGs and `labels.csv` under `data/fairface/{train,validation}/`.
+   - Versions: `--version` can be `1.25` (default) or `0.25`.  
+   - Optional speed cap: add `--max_per_split 500` (or any int) for quick smoke tests.  
+   The script writes JPEGs and `labels.csv` to `data/fairface/{train,validation}/`.
 2) **Keep front-facing images only:**  
    `python script/data_processing/get_frontish_faces.py`  
    Uses Haar cascades to keep images with a detectable face + two eyes. Output: `data/cleaned/frontish/{train,validation}/`.
