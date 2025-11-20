@@ -68,3 +68,90 @@ Pipeline to study how simple skin-tone normalization affects gender classificati
 - `metadata/models/fairface_gender_image_detection_pt2/` (base HF checkpoint).
 - `metadata/models/fairface_gender_image_detection_norm_ft*/` (fine-tuned checkpoints).
 - `metadata/results/` (evaluation CSVs and plots).
+
+## Workflow cheatsheet (commands used)
+### Basics
+```bash
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### GPU interactive (SCC)
+```bash
+qrsh -P cs599dg \
+  -pe omp 4 \
+  -l gpus=1 \
+  -l gpu_t=A40 \
+  -l h_vmem=16G \
+  -l mem_free=32G \
+  -l h_rt=12:00:00 \
+  bash -lc 'cd "$SGE_O_WORKDIR"; echo "GPU session active on host: $(hostname)"; nvidia-smi; exec bash -l'
+```
+
+### Batch jobs
+- Fetch FairFace: `qsub batchJob/fetch_ff.job`
+- Check status/logs: `qstat -u $USER` then `tail -f batchJob/logs/log_fetch_ff.txt`
+- Filter to front-ish: `qsub batchJob/get_frontish.job` (log: `batchJob/logs/log_frontish.txt`)
+- Eval baseline/normalized on CPU:  
+  `qsub batchJob/run_ff_val_base_cpu.job`  
+  `qsub batchJob/run_ff_val_norm_cpu.job`
+- Monitor any job log: `tail -f batchJob/logs/<logfile>.txt`
+
+### Smoke test on mini_eval (20–50 images)
+```bash
+# Baseline
+python script/eval/run_fairface.py --data_root data/mini_eval --split validation --max_images 50
+# Skin-tone-normalized
+python script/eval/run_fairface.py --data_root data/mini_eval --split validation --use_norm --max_images 50
+```
+
+### Full validation (baseline vs normalized)
+```bash
+python script/eval/run_fairface.py \
+  --data_root data/cleaned/frontish \
+  --split validation \
+  --model_dir metadata/models/fairface_gender_image_detection_pt2 \
+  --out_csv metadata/results/hf_fairface_gender_frontish_validation.csv
+
+python script/eval/run_fairface.py \
+  --data_root data/cleaned/frontish \
+  --split validation \
+  --use_norm \
+  --model_dir metadata/models/fairface_gender_image_detection_pt2 \
+  --out_csv metadata/results/hf_fairface_gender_frontish_validation_norm.csv
+```
+
+### Fine-tune on normalized train (Experiment 1.5)
+```bash
+python script/train/fine_tune_fairface_norm.py \
+  --data_root data/cleaned/frontish \
+  --model_dir metadata/models/fairface_gender_image_detection_pt2 \
+  --out_dir metadata/models/fairface_gender_image_detection_norm_ft_full \
+  --batch_size 32 \
+  --epochs 3 \
+  --lr 1e-4 \
+  --num_workers 0
+```
+
+### Evaluate fine-tuned model
+```bash
+# Eval on RGB validation
+python script/eval/run_fairface.py \
+  --data_root data/cleaned/frontish \
+  --split validation \
+  --model_dir metadata/models/fairface_gender_image_detection_norm_ft_full \
+  --out_csv metadata/results/ff_norm_ft_full_eval_on_rgb.csv
+
+# Eval on normalized validation
+python script/eval/run_fairface.py \
+  --data_root data/cleaned/frontish \
+  --split validation \
+  --use_norm \
+  --model_dir metadata/models/fairface_gender_image_detection_norm_ft_full \
+  --out_csv metadata/results/ff_norm_ft_full_eval_on_norm.csv
+```
+
+### Analysis
+```bash
+python script/eval/analyze_experiment1_full.py
+```
